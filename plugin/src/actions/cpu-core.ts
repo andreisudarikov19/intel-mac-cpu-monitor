@@ -5,9 +5,11 @@ import streamDeck, {
     type WillDisappearEvent,
     type DidReceiveSettingsEvent,
     type SendToPluginEvent,
+    type KeyDownEvent,
 } from "@elgato/streamdeck";
 import type { JsonValue } from "@elgato/utils";
-import { hub } from "../hub.js";
+import { hub, type ViewMode } from "../hub.js";
+import { toggleView } from "./toggle-view.js";
 
 type Settings = {
     /** Selected core index from the Property Inspector.
@@ -16,6 +18,8 @@ type Settings = {
     coreIndex?: number | string;
     /** Last user-chosen temperature unit; mirrored into global settings. */
     tempUnit?: "C" | "F";
+    /** Current view mode for this key. Toggled by key press. */
+    viewMode?: ViewMode;
 };
 
 @action({ UUID: "dev.andreisudarikov.intel-mac-monitor.cpu-core" })
@@ -28,6 +32,7 @@ export class CPUCoreTempAction extends SingletonAction<Settings> {
                 setImage: (uri) => ev.action.setImage(uri).then(() => undefined),
             },
             { kind: "cpuCore", coreIndex: idx },
+            ev.payload.settings.viewMode ?? "graph",
         );
     }
 
@@ -43,8 +48,13 @@ export class CPUCoreTempAction extends SingletonAction<Settings> {
                 setImage: (uri) => ev.action.setImage(uri).then(() => undefined),
             },
             { kind: "cpuCore", coreIndex: idx },
+            ev.payload.settings.viewMode ?? "graph",
         );
         applyUnitFromSettings(ev.payload.settings);
+    }
+
+    override onKeyDown(ev: KeyDownEvent<Settings>): Promise<void> {
+        return toggleView(ev);
     }
 
     override onSendToPlugin(ev: SendToPluginEvent<JsonValue, Settings>): Promise<void> | void {

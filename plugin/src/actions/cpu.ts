@@ -4,11 +4,14 @@ import {
     type WillAppearEvent,
     type WillDisappearEvent,
     type DidReceiveSettingsEvent,
+    type KeyDownEvent,
 } from "@elgato/streamdeck";
-import { hub } from "../hub.js";
+import { hub, type ViewMode } from "../hub.js";
+import { toggleView } from "./toggle-view.js";
 
 type Settings = {
     tempUnit?: "C" | "F";
+    viewMode?: ViewMode;
 };
 
 @action({ UUID: "dev.andreisudarikov.intel-mac-monitor.cpu" })
@@ -20,6 +23,7 @@ export class CPUTempAction extends SingletonAction<Settings> {
                 setImage: (uri) => ev.action.setImage(uri).then(() => undefined),
             },
             { kind: "cpu" },
+            ev.payload.settings.viewMode ?? "graph",
         );
     }
 
@@ -32,5 +36,17 @@ export class CPUTempAction extends SingletonAction<Settings> {
         if (s.tempUnit === "C" || s.tempUnit === "F") {
             hub.setGlobalSettings({ tempUnit: s.tempUnit });
         }
+        hub.subscribe(
+            {
+                contextId: ev.action.id,
+                setImage: (uri) => ev.action.setImage(uri).then(() => undefined),
+            },
+            { kind: "cpu" },
+            s.viewMode ?? "graph",
+        );
+    }
+
+    override onKeyDown(ev: KeyDownEvent<Settings>): Promise<void> {
+        return toggleView(ev);
     }
 }

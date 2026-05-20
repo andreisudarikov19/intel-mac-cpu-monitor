@@ -5,13 +5,16 @@ import streamDeck, {
     type WillDisappearEvent,
     type DidReceiveSettingsEvent,
     type SendToPluginEvent,
+    type KeyDownEvent,
 } from "@elgato/streamdeck";
 import type { JsonValue } from "@elgato/utils";
-import { hub } from "../hub.js";
+import { hub, type ViewMode } from "../hub.js";
+import { toggleView } from "./toggle-view.js";
 
 type Settings = {
     /** sdpi-select returns its `value` as a string; pickFanIndex coerces. */
     fanIndex?: number | string;
+    viewMode?: ViewMode;
 };
 
 @action({ UUID: "dev.andreisudarikov.intel-mac-monitor.fan" })
@@ -24,6 +27,7 @@ export class FanSpeedAction extends SingletonAction<Settings> {
                 setImage: (uri) => ev.action.setImage(uri).then(() => undefined),
             },
             { kind: "fan", fanIndex: idx },
+            ev.payload.settings.viewMode ?? "graph",
         );
     }
 
@@ -39,7 +43,12 @@ export class FanSpeedAction extends SingletonAction<Settings> {
                 setImage: (uri) => ev.action.setImage(uri).then(() => undefined),
             },
             { kind: "fan", fanIndex: idx },
+            ev.payload.settings.viewMode ?? "graph",
         );
+    }
+
+    override onKeyDown(ev: KeyDownEvent<Settings>): Promise<void> {
+        return toggleView(ev);
     }
 
     override onSendToPlugin(ev: SendToPluginEvent<JsonValue, Settings>): Promise<void> | void {
