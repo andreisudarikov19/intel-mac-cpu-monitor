@@ -6,6 +6,65 @@ not the development journey. Append new versions to the top.
 
 ---
 
+## v1.2.1 (2026-05-20)
+
+Bug-fix release. CPU power readings on Intel iMacs were bogusly low
+because the helper's catalog probe was picking SMC key `PCPT`, whose
+dataType is `spa5` (a signed 10.5 fixed-point format we didn't decode),
+and the decoder fell through to byte-0-as-UI8 — yielding ~4 W
+regardless of actual draw.
+
+### Fixed
+- **CPU power picks `PCPR` first** instead of `PCPC`/`PCPT`. PCPR =
+  "CPU Package total (SMC)" — the RAPL-equivalent, matches reality
+  (~8 W idle / 50 W moderate load / 125 W full TDP on a 10-core iMac).
+- **Wrong `PCPT` decode** — was decoding as UI8 (returned `bytes[0]`
+  as integer watts) because the dispatch fell through to the default
+  case. Now decoded correctly as `spa5`.
+- **`decodePower` no longer falls back to UI8** for unknown dataTypes.
+  For power readings, byte-0-as-watts has no physical meaning, so a
+  nil return (which makes the catalog skip the key) is safer than a
+  wrong number.
+
+### Added
+- **`Decoders.decodeSPFixedPoint(b0, b1, dataType)`** — generic decoder
+  for the SMC SP-family fixed-point (`sp78`, `sp87`, `spa5`, etc.).
+  Pattern: dataType is `spXY` where X = integer bits, Y = fractional
+  bits (both hex, totaling 15 to fit a signed Int16). Value =
+  `signed_int16(b0, b1) / 2^Y`.
+- **Power-probe diagnostic dump** — at every helper start, the helper
+  writes one stderr line per known power SMC key (`PCPR`, `PCTR`,
+  `PCPT`, `PCPC`, `PCAM`, `PC0R`, `PC0C`, `PC0G`, `PCEC`, `PC1C`,
+  `PC2C`, `PC3C`, `PG0C`, `PCGC`, `PCPG`, `PG0R`, `PG1R`, `PCGM`,
+  `PSTR`, `PDTR`, `PZ0F`) showing key, dataType, raw bytes, and
+  decoded value. Captured by the plugin's stderr logger at ERROR level
+  (noisy at one line per spawn, but invaluable when CPU/GPU power
+  reads as zero on a new Mac model — go to the plugin log, grep
+  `power-probe`, compare with `sudo powermetrics --samplers cpu_power
+  -n 1 -i 1000`).
+
+### Changed
+- **CPU power preference order**: `PCPR` → `PCTR` → `PCPT` → `PCPC` →
+  `PCAM` → `PC0R` → `PC0C` (was `PCPC` → `PCPT` → `PCTR` → `PC0C` →
+  `PCAM`). PCPR is the canonical Intel RAPL-equivalent total.
+- **GPU power preference order**: added `PG1R` between `PG0R` and
+  `PCGM`. No semantic change on hardware where `PG0C` works.
+
+### Tests
+- New: 5 Swift tests covering `decodeSPFixedPoint` (including `spa5`),
+  `decodePower` returning nil for unknown dataTypes, and updated
+  catalog assertions for the PCPR-first order.
+- Total: **86 Swift + 81 TypeScript = 167** (was 162).
+
+### Notes for future debugging
+- If a different Intel Mac shows wrong CPU/GPU power, restart the
+  plugin, then grep `dev.andreisudarikov.intel-mac-monitor.sdPlugin
+  /logs/*.log` for `power-probe`. The dump shows all candidate keys'
+  values — pick the one matching `sudo powermetrics`, add it to the
+  preference list in `helper/Sources/smcreader/Sensors.swift`.
+
+---
+
 ## v1.0 (2026-05-20)
 
 Initial release. Stream Deck plugin for Intel Macs showing live CPU
@@ -343,7 +402,7 @@ Power profiles (W) — tuned against actual Intel Mac TDPs (laptops
 
 ---
 
-## Cumulative current state (post-v1.2)
+## Cumulative current state (post-v1.2.1)
 
 | | Count |
 |---|---|
@@ -351,7 +410,7 @@ Power profiles (W) — tuned against actual Intel Mac TDPs (laptops
 | View modes per action | **3** (graph / slide / meter) |
 | Distinct sensor profiles | **10** (8 temperature + 2 power) |
 | Color bands | **5** (cold / cool / warm / hot / critical) |
-| Total tests | **162** (81 Swift + 81 TS) |
+| Total tests | **167** (86 Swift + 81 TS) |
 | Helper sample rate | 1 Hz |
 | History buffer | 45 samples |
 | Visible graph window | 30 samples |

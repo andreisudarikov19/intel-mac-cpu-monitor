@@ -230,20 +230,23 @@ struct CatalogTests {
         #expect(cat.thunderbolt?.key == "TTLD")
     }
 
-    @Test func probe_CPUPower_PCPCFirst() {
+    @Test func probe_CPUPower_PCPRFirst() {
+        // PCPR is the most accurate "CPU Package total" on Intel Macs
+        // (matches Intel RAPL counter). Verified on hardware in v1.2.1.
         let smc = MockSMC()
+        smc.setPower(key: "PCPR", watts: 50.0)
+        smc.setPower(key: "PCPT", watts: 32.0)
         smc.setPower(key: "PCPC", watts: 15.5)
-        smc.setPower(key: "PCPT", watts: 16.0)
         let cat = CatalogProbe.probe(reader: smc, t2: true)
-        #expect(cat.cpuPower?.key == "PCPC")
+        #expect(cat.cpuPower?.key == "PCPR")
     }
 
     @Test func probe_CPUPower_FallsBackToTotal() {
+        // PCPR missing; PCTR should be the next pick.
         let smc = MockSMC()
-        // PCPC missing; PCPT present.
-        smc.setPower(key: "PCPT", watts: 18.0)
+        smc.setPower(key: "PCTR", watts: 50.0)
         let cat = CatalogProbe.probe(reader: smc, t2: true)
-        #expect(cat.cpuPower?.key == "PCPT")
+        #expect(cat.cpuPower?.key == "PCTR")
     }
 
     @Test func probe_GPUPower_PrefersDiscrete() {
