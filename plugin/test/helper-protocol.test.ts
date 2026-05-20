@@ -83,4 +83,24 @@ describe("isHelperEvent type predicate", () => {
             expect("cpuPackage" in parsed).toBe(true);
         }
     });
+
+    it("parses a real reading line with ambient/ram/ssd fields", () => {
+        // Real line captured from the test hardware after v1.2 sensors added.
+        const line = '{"ambient":12.6875,"cpu":{"TC0c":53},"cpuAvg":53,"cpuPackage":43.0625,"event":"reading","fans":[{"i":0,"rpm":1204}],"gpu":45,"ram":37.625,"ssd":37.05078125,"ts":1779307678}';
+        const parsed = JSON.parse(line);
+        expect(isHelperEvent(parsed)).toBe(true);
+        if (parsed.event === "reading") {
+            expect(parsed.ambient).toBeCloseTo(12.6875, 4);
+            expect(parsed.ram).toBeCloseTo(37.625, 3);
+            expect(parsed.ssd).toBeCloseTo(37.05, 1);
+        }
+    });
+
+    it("accepts a reading line where the new fields are absent (older helpers)", () => {
+        // A helper that doesn't emit ambient/ram/ssd still produces a
+        // valid event; isHelperEvent must accept it.
+        const line = '{"cpu":{"TC0c":53},"event":"reading","fans":[{"i":0,"rpm":1201}],"ts":1}';
+        const parsed = JSON.parse(line);
+        expect(isHelperEvent(parsed)).toBe(true);
+    });
 });

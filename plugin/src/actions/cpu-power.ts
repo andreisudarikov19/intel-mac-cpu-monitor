@@ -11,19 +11,18 @@ import { hub, type ViewMode } from "../hub.js";
 import { handleKeyDown, handleKeyUp } from "./toggle-view.js";
 
 type Settings = {
-    tempUnit?: "C" | "F";
     viewMode?: ViewMode;
 };
 
-@action({ UUID: "dev.andreisudarikov.intel-mac-monitor.cpu" })
-export class CPUTempAction extends SingletonAction<Settings> {
+@action({ UUID: "dev.andreisudarikov.intel-mac-monitor.cpu-power" })
+export class CPUPowerAction extends SingletonAction<Settings> {
     override onWillAppear(ev: WillAppearEvent<Settings>): Promise<void> | void {
         hub.subscribe(
             {
                 contextId: ev.action.id,
                 setImage: (uri) => ev.action.setImage(uri).then(() => undefined),
             },
-            { kind: "cpu" },
+            { kind: "cpuPower" },
             ev.payload.settings.viewMode ?? "graph",
         );
     }
@@ -33,20 +32,17 @@ export class CPUTempAction extends SingletonAction<Settings> {
     }
 
     override onDidReceiveSettings(ev: DidReceiveSettingsEvent<Settings>): Promise<void> | void {
-        const s = ev.payload.settings;
-        if (s.tempUnit === "C" || s.tempUnit === "F") {
-            hub.setGlobalSettings({ tempUnit: s.tempUnit });
-        }
         hub.subscribe(
             {
                 contextId: ev.action.id,
                 setImage: (uri) => ev.action.setImage(uri).then(() => undefined),
             },
-            { kind: "cpu" },
-            s.viewMode ?? "graph",
+            { kind: "cpuPower" },
+            ev.payload.settings.viewMode ?? "graph",
         );
     }
 
+    /** Power actions toggle between graph and the boombox VU meter view. */
     override onKeyDown(ev: KeyDownEvent<Settings>): void {
         handleKeyDown(ev);
     }

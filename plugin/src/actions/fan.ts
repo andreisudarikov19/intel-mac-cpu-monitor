@@ -6,10 +6,11 @@ import streamDeck, {
     type DidReceiveSettingsEvent,
     type SendToPluginEvent,
     type KeyDownEvent,
+    type KeyUpEvent,
 } from "@elgato/streamdeck";
 import type { JsonValue } from "@elgato/utils";
 import { hub, type ViewMode } from "../hub.js";
-import { toggleView } from "./toggle-view.js";
+import { handleKeyDown, handleKeyUp } from "./toggle-view.js";
 
 type Settings = {
     /** sdpi-select returns its `value` as a string; pickFanIndex coerces. */
@@ -47,8 +48,12 @@ export class FanSpeedAction extends SingletonAction<Settings> {
         );
     }
 
-    override onKeyDown(ev: KeyDownEvent<Settings>): Promise<void> {
-        return toggleView(ev);
+    override onKeyDown(ev: KeyDownEvent<Settings>): void {
+        handleKeyDown(ev);
+    }
+
+    override onKeyUp(ev: KeyUpEvent<Settings>): void {
+        handleKeyUp(ev);
     }
 
     override onSendToPlugin(ev: SendToPluginEvent<JsonValue, Settings>): Promise<void> | void {

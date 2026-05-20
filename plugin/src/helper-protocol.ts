@@ -12,6 +12,14 @@ export type ReadyEvent = {
     cpuCores: CPUCoreInfo[];
     cpuPackageKey?: string;
     gpuSensor?: string;
+    ambientSensor?: string;
+    ramSensor?: string;
+    ssdSensor?: string;
+    chipsetSensor?: string;
+    wifiSensor?: string;
+    thunderboltSensor?: string;
+    cpuPowerSensor?: string;
+    gpuPowerSensor?: string;
     fans: FanInfo[];
 };
 
@@ -33,6 +41,14 @@ export type ReadingEvent = {
     cpuAvg?: number;
     cpuPackage?: number;
     gpu?: number;
+    ambient?: number;
+    ram?: number;
+    ssd?: number;
+    chipset?: number;
+    wifi?: number;
+    thunderbolt?: number;
+    cpuPower?: number;
+    gpuPower?: number;
     fans: FanReading[];
 };
 

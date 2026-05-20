@@ -44,6 +44,66 @@ enum Sensors {
         "TG0D", "TCGC", "TG0H", "TG0P",
     ]
 
+    /// Ambient air (intake) temperature keys, in preference order.
+    /// Source: exelban/stats uses TA%P template (TA0P, TA1P). Some Intel
+    /// MacBook Pros expose lowercase `TaLP` (left passive) and `TaRF`
+    /// (right fan) — included as fallbacks.
+    static let ambientKeysInPreferenceOrder: [String] = [
+        "TA0P", "TA1P", "TaLP", "TaRF",
+    ]
+
+    /// Memory (RAM) temperature keys, in preference order. Intel-Mac
+    /// specific — most iMacs expose `Ts0S` (slot 0 sense); Mac Pros use
+    /// `TMA0`/`TMB0` for module bank A/B; some expose `TM0P` (proximity)
+    /// or fall through to `Tm0P` (mainboard, often near memory).
+    static let ramKeysInPreferenceOrder: [String] = [
+        "Ts0S", "TM0P", "Tm0P", "TMA0", "TMB0",
+    ]
+
+    /// Storage (SSD/HDD) temperature keys, in preference order.
+    /// Source: exelban/stats uses TH%A/TH%B/TH%C templates; legacy Intel
+    /// Macs sometimes expose `TH0F` or `TH0x`. We probe sensor A first as
+    /// it's the most common location for the primary drive.
+    static let ssdKeysInPreferenceOrder: [String] = [
+        "TH0A", "TH0B", "TH0C", "TH0F", "TH0x", "TH1A",
+    ]
+
+    /// Chipset (Northbridge / PCH) temperature keys, in preference order.
+    /// Source: exelban/stats names these `Northbridge`. Most accurate is
+    /// the diode (`TN0D`); we fall back through heatsink, proximity, and
+    /// finally the nearby powerboard sensor.
+    static let chipsetKeysInPreferenceOrder: [String] = [
+        "TN0D", "TN0H", "TN0P", "Tp0P",
+    ]
+
+    /// Wi-Fi card temperature keys. Source: exelban/stats — `TW0P` is the
+    /// "Airport" proximity sensor (all Macs that expose Wi-Fi temp use it).
+    static let wifiKeysInPreferenceOrder: [String] = [
+        "TW0P",
+    ]
+
+    /// Thunderbolt controller temperature keys, in preference order.
+    /// Source: exelban/stats uses TI%P template (TI0P, TI1P); MacBook Pros
+    /// with two TB controllers also expose `TTLD`/`TTRD` (left/right diode).
+    static let thunderboltKeysInPreferenceOrder: [String] = [
+        "TI0P", "TI1P", "TTLD", "TTRD",
+    ]
+
+    /// CPU power (watts) keys, in preference order.
+    /// Source: exelban/stats — PCPC is "CPU Package", PCPT is "CPU Package
+    /// total", PCTR is "CPU Total". PC0C is per-core power; PCAM is the
+    /// IMON (current monitor) reading.
+    static let cpuPowerKeysInPreferenceOrder: [String] = [
+        "PCPC", "PCPT", "PCTR", "PC0C", "PCAM",
+    ]
+
+    /// GPU power (watts) keys, in preference order.
+    /// Source: exelban/stats — PG0C is the discrete GPU; PCGC and PCPG
+    /// are the integrated Intel GPU (different naming across generations).
+    static let gpuPowerKeysInPreferenceOrder: [String] = [
+        "PG0C", "PCGC", "PCPG", "PG0R", "PCGM",
+    ]
+
     /// Number-of-fans key. Source: SMC+Fans.swift in Fanny/SMC.
     static let fanCountKey = "FNum"
 

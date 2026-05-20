@@ -19,9 +19,11 @@ import { renderSVG, svgDataUri, type RenderInput } from "./render.js";
 import {
     cToF,
     fanBand,
-    TEMP_RANGE,
-    tempBand,
+    TEMP_PROFILES,
+    POWER_PROFILES,
+    bandFor,
     type Band,
+    type MetricProfile,
 } from "./thresholds.js";
 
 // 45-sample ring buffer (= 45 s at 1 Hz). The graph only renders the most
@@ -31,8 +33,10 @@ const HISTORY_SIZE = 45;
 
 /** Visual mode for a single key.
  *  - "graph": default — header + value + sparkline (current behavior)
- *  - "value": header + value on a band-colored solid background, no graph */
-export type ViewMode = "graph" | "value";
+ *  - "value": header + value in a band-colored frame (toggled by tap on
+ *    temperature actions)
+ *  - "meter": 80s VU-meter column (toggled by tap on power actions) */
+export type ViewMode = "graph" | "value" | "meter";
 
 export type GlobalSettings = {
     /** "C" or "F". Default "C". */
@@ -51,6 +55,14 @@ type SubscriptionKind =
     | { kind: "cpuCore"; coreIndex: number }
     | { kind: "cpu" }
     | { kind: "gpu" }
+    | { kind: "ambient" }
+    | { kind: "ram" }
+    | { kind: "ssd" }
+    | { kind: "chipset" }
+    | { kind: "wifi" }
+    | { kind: "thunderbolt" }
+    | { kind: "cpuPower" }
+    | { kind: "gpuPower" }
     | { kind: "fan"; fanIndex: number };
 
 type Subscription = {
@@ -166,7 +178,12 @@ export class Hub {
         }
         streamDeck.logger.info(
             `helper ready: cores=${ev.cpuCores.length} package=${ev.cpuPackageKey ?? "none"} ` +
-            `gpu=${ev.gpuSensor ?? "none"} fans=${ev.fans.length} t2=${ev.t2}`
+            `gpu=${ev.gpuSensor ?? "none"} ambient=${ev.ambientSensor ?? "none"} ` +
+            `ram=${ev.ramSensor ?? "none"} ssd=${ev.ssdSensor ?? "none"} ` +
+            `chipset=${ev.chipsetSensor ?? "none"} wifi=${ev.wifiSensor ?? "none"} ` +
+            `tbolt=${ev.thunderboltSensor ?? "none"} ` +
+            `cpuW=${ev.cpuPowerSensor ?? "none"} gpuW=${ev.gpuPowerSensor ?? "none"} ` +
+            `fans=${ev.fans.length} t2=${ev.t2}`
         );
     }
 
@@ -217,6 +234,22 @@ export class Hub {
             }
             case "gpu":
                 return typeof ev.gpu === "number" && Number.isFinite(ev.gpu) ? ev.gpu : null;
+            case "ambient":
+                return typeof ev.ambient === "number" && Number.isFinite(ev.ambient) ? ev.ambient : null;
+            case "ram":
+                return typeof ev.ram === "number" && Number.isFinite(ev.ram) ? ev.ram : null;
+            case "ssd":
+                return typeof ev.ssd === "number" && Number.isFinite(ev.ssd) ? ev.ssd : null;
+            case "chipset":
+                return typeof ev.chipset === "number" && Number.isFinite(ev.chipset) ? ev.chipset : null;
+            case "wifi":
+                return typeof ev.wifi === "number" && Number.isFinite(ev.wifi) ? ev.wifi : null;
+            case "thunderbolt":
+                return typeof ev.thunderbolt === "number" && Number.isFinite(ev.thunderbolt) ? ev.thunderbolt : null;
+            case "cpuPower":
+                return typeof ev.cpuPower === "number" && Number.isFinite(ev.cpuPower) ? ev.cpuPower : null;
+            case "gpuPower":
+                return typeof ev.gpuPower === "number" && Number.isFinite(ev.gpuPower) ? ev.gpuPower : null;
             case "fan": {
                 const f = ev.fans.find(
                     (x) => x && typeof x === "object" && (x as { i?: unknown }).i === kind.fanIndex,
@@ -251,7 +284,7 @@ export class Hub {
             band: "cool",
             noData: true,
             samples: [],
-            range: TEMP_RANGE,
+            range: TEMP_PROFILES.cpu.range,
         });
         await sub.subscriber.setImage(svgDataUri(svg));
     }
@@ -263,12 +296,28 @@ export class Hub {
         switch (sub.kind.kind) {
             case "cpuCore": {
                 const label = `CORE${sub.kind.coreIndex}`;
-                return this.tempInput(label, latest, sub, noData);
+                return this.tempInput(label, latest, sub, noData, TEMP_PROFILES.cpu);
             }
             case "cpu":
-                return this.tempInput("CPU", latest, sub, noData);
+                return this.tempInput("CPU", latest, sub, noData, TEMP_PROFILES.cpu);
             case "gpu":
-                return this.tempInput("GPU", latest, sub, noData);
+                return this.tempInput("GPU", latest, sub, noData, TEMP_PROFILES.gpu);
+            case "ambient":
+                return this.tempInput("AIR", latest, sub, noData, TEMP_PROFILES.ambient);
+            case "ram":
+                return this.tempInput("RAM", latest, sub, noData, TEMP_PROFILES.ram);
+            case "ssd":
+                return this.tempInput("SSD", latest, sub, noData, TEMP_PROFILES.ssd);
+            case "chipset":
+                return this.tempInput("CHIP", latest, sub, noData, TEMP_PROFILES.chipset);
+            case "wifi":
+                return this.tempInput("WIFI", latest, sub, noData, TEMP_PROFILES.wifi);
+            case "thunderbolt":
+                return this.tempInput("TBOLT", latest, sub, noData, TEMP_PROFILES.thunderbolt);
+            case "cpuPower":
+                return this.powerInput("CPU", latest, sub, noData, POWER_PROFILES.cpu);
+            case "gpuPower":
+                return this.powerInput("GPU", latest, sub, noData, POWER_PROFILES.gpu);
             case "fan": {
                 const label = (this.ready && this.ready.fans.length > 1)
                     ? `FAN${sub.kind.fanIndex + 1}`
@@ -278,7 +327,13 @@ export class Hub {
         }
     }
 
-    private tempInput(label: string, latest: number | null, sub: Subscription, noData: boolean): RenderInput {
+    private tempInput(
+        label: string,
+        latest: number | null,
+        sub: Subscription,
+        noData: boolean,
+        profile: MetricProfile,
+    ): RenderInput {
         const unitF = this.globalSettings.tempUnit === "F";
         let valueText = "";
         let band: Band = "cool";
@@ -286,7 +341,7 @@ export class Hub {
             const shown = unitF ? cToF(latest) : latest;
             valueText = `${Math.round(shown)}°${unitF ? "F" : "C"}`;
             // Banding is always done in Celsius regardless of display unit.
-            band = tempBand(latest);
+            band = bandFor(latest, profile);
         }
         return {
             label,
@@ -294,8 +349,40 @@ export class Hub {
             band,
             noData,
             samples: sub.history.toArray(),
-            range: TEMP_RANGE,
+            range: profile.range,
             viewMode: sub.viewMode,
+            rawValue: latest,
+            profile,
+        };
+    }
+
+    private powerInput(
+        label: string,
+        latest: number | null,
+        sub: Subscription,
+        noData: boolean,
+        profile: MetricProfile,
+    ): RenderInput {
+        let valueText = "";
+        let band: Band = "cool";
+        if (!noData && latest !== null) {
+            // Format with one decimal place for low values (<10W) to show
+            // fractional precision; whole-watt for higher values.
+            valueText = latest < 10
+                ? `${latest.toFixed(1)}W`
+                : `${Math.round(latest)}W`;
+            band = bandFor(latest, profile);
+        }
+        return {
+            label,
+            valueText,
+            band,
+            noData,
+            samples: sub.history.toArray(),
+            range: profile.range,
+            viewMode: sub.viewMode,
+            rawValue: latest,
+            profile,
         };
     }
 
@@ -313,14 +400,24 @@ export class Hub {
             valueText = `${Math.round(latest)}`;
             band = fanBand(latest, max);
         }
+        // Percentage-based profile so long-press meter view works for
+        // fans too — bands at 30 / 70 / 100 % of max RPM mirror fanBand.
+        const fanProfile: MetricProfile = {
+            range: { min: 0, max },
+            coolMax: max * 0.3,
+            warmMax: max * 0.7,
+            hotMax: max,
+        };
         return {
             label,
             valueText,
             band,
             noData,
             samples: sub.history.toArray(),
-            range: { min: 0, max },
+            range: fanProfile.range,
             viewMode: sub.viewMode,
+            rawValue: latest,
+            profile: fanProfile,
         };
     }
 }
@@ -331,6 +428,14 @@ function subscriptionKindsEqual(a: SubscriptionKind, b: SubscriptionKind): boole
     switch (a.kind) {
         case "cpu":
         case "gpu":
+        case "ambient":
+        case "ram":
+        case "ssd":
+        case "chipset":
+        case "wifi":
+        case "thunderbolt":
+        case "cpuPower":
+        case "gpuPower":
             return true;
         case "cpuCore":
             return a.coreIndex === (b as { coreIndex: number }).coreIndex;

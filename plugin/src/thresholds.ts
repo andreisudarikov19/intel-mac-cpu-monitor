@@ -1,19 +1,19 @@
 // Color thresholds for temperatures and fan speeds.
-// Spec: discrete threshold-based colors, four bands per metric type.
+// Spec: discrete threshold-based colors. Up to five bands — "cold" only
+// applies to ambient air; all other sensor types use cool→critical.
 
-export type Band = "cool" | "warm" | "hot" | "critical";
+export type Band = "cold" | "cool" | "warm" | "hot" | "critical";
 
 // Palette inspired by iPhone StandBy / "Color" clock faces — warmer and
 // more saturated than macOS dark-mode system colors. Tuned for at-a-glance
 // readability from across a room (Stream Deck keys are 19 mm tall).
 
-// All four bands derived from a single HSL anchor — S = 79%, L = 58% —
+// All bands derived from a single HSL anchor — S = 79%, L = 58% —
 // rotating hue around the color wheel. Keeping S/L constant makes the
-// palette feel like a coherent family rather than four arbitrary picks.
-// Cool green hue matches the "Stream Deck monitor" aesthetic Andrei
-// referenced.
+// palette feel like a coherent family rather than five arbitrary picks.
 
 export const COLORS: Record<Band, string> = {
+    cold: "#3FBEE9",        // H 195° — cool cyan (ambient air only)
     cool: "#42E84A",        // H 123° — vivid pure green
     warm: "#E8DA42",        // H  55° — lemon yellow
     hot: "#E88E42",         // H  28° — warm tangerine
@@ -34,15 +34,80 @@ export const BG_COLOR = "#1c1c1e";
  *  view mode). Contrast vs each band tested AAA except critical (AA). */
 export const DARK_ON_BAND_COLOR = "#1c1c1e";
 
-/** Y-axis fixed range for temperature actions, in °C. */
+/** Y-axis fixed range for CPU/GPU temperature actions, in °C. Kept for
+ *  backwards compatibility — the new TEMP_PROFILES map supersedes it. */
 export const TEMP_RANGE = { min: 30, max: 100 } as const;
 
-/** Classify a temperature reading (°C) into a color band. */
-export function tempBand(celsius: number): Band {
-    if (celsius <= 60) return "cool";
-    if (celsius <= 80) return "warm";
-    if (celsius <= 95) return "hot";
+/** Per-sensor-type Y-axis range plus the three band thresholds.
+ *  Different sensors have very different normal/hot/critical bands:
+ *  ambient air idles around 20-25 °C; CPU at 50 °C is just fine; SSDs
+ *  throttle around 70 °C. One-size thresholds would make most graphs
+ *  visually flat. */
+/** A numeric metric's display range plus band thresholds. Used for both
+ *  temperature and power readings — structurally identical, semantically
+ *  the same job (classify a number into a colored band). */
+export type MetricProfile = {
+    range: { min: number; max: number };
+    /** Optional. Only set on profiles where "cold" is meaningful (ambient
+     *  air can reasonably read below this; CPU/GPU/RAM/SSD cannot). */
+    coldMax?: number;    // ≤ this → cold band (cyan)
+    coolMax: number;     // ≤ this → cool band
+    warmMax: number;     // ≤ this → warm band
+    hotMax: number;      // ≤ this → hot band; above → critical
+};
+
+/** Backwards-compat alias — old code references `TempProfile`. */
+export type TempProfile = MetricProfile;
+
+// Ambient uses the same 0–100°C range as CPU/GPU so a 13°C ambient and a
+// 49°C CPU reading produce *visually distinct* line heights — the Y-axis
+// finally means the same thing across all temperature actions. The
+// trade-off is that ambient never fills the graph as high as CPU; that's
+// honest, since ambient really IS the lowest-reading sensor.
+export const TEMP_PROFILES = {
+    cpu:         { range: { min: 30, max: 100 },                coolMax: 60, warmMax: 80, hotMax: 95 },
+    gpu:         { range: { min: 30, max: 100 },                coolMax: 60, warmMax: 80, hotMax: 95 },
+    ambient:     { range: { min:  0, max: 100 }, coldMax: 20,   coolMax: 30, warmMax: 50, hotMax: 70 },
+    ram:         { range: { min: 20, max:  90 },                coolMax: 50, warmMax: 65, hotMax: 80 },
+    ssd:         { range: { min: 20, max:  90 },                coolMax: 50, warmMax: 65, hotMax: 80 },
+    // Chipset (PCH/Northbridge) runs hot on Intel Macs — 60-80 °C idle is
+    // normal; throttle territory around 95 °C.
+    chipset:     { range: { min: 30, max: 100 },                coolMax: 65, warmMax: 80, hotMax: 95 },
+    // Wi-Fi card: typically 30-50 °C idle, can hit 60+ under load.
+    wifi:        { range: { min: 20, max:  90 },                coolMax: 45, warmMax: 60, hotMax: 75 },
+    // Thunderbolt controller: similar envelope to Wi-Fi but tolerates a
+    // little more heat under sustained bandwidth.
+    thunderbolt: { range: { min: 20, max:  90 },                coolMax: 50, warmMax: 65, hotMax: 80 },
+} as const satisfies Record<string, MetricProfile>;
+
+/** Power profiles (watts). Ranges and bands tuned to actual Intel Mac
+ *  TDPs (researched per model). The reference "peak" for the meter's
+ *  full-scale fill is the 10-core iMac 27" (125 W TDP, ~170 W boost) for
+ *  CPU, and the iMac 27" 2020 high-end Radeon Pro 5700 XT (130 W TDP)
+ *  for GPU. Lower-TDP Macs (laptops, Mac mini) fill less of the meter at
+ *  full load, which is honest — they really do consume less. */
+export const POWER_PROFILES = {
+    cpu: { range: { min: 0, max: 125 }, coolMax: 40, warmMax: 70, hotMax: 100 },
+    gpu: { range: { min: 0, max: 150 }, coolMax: 25, warmMax: 70, hotMax: 130 },
+} as const satisfies Record<string, MetricProfile>;
+
+/** Classify a numeric reading into a color band using a profile.
+ *  Profiles without `coldMax` skip the cold check. */
+export function bandFor(value: number, profile: MetricProfile): Band {
+    if (profile.coldMax !== undefined && value <= profile.coldMax) return "cold";
+    if (value <= profile.coolMax) return "cool";
+    if (value <= profile.warmMax) return "warm";
+    if (value <= profile.hotMax) return "hot";
     return "critical";
+}
+
+/** Backwards-compat alias — old code references `tempBandFor`. */
+export const tempBandFor = bandFor;
+
+/** Legacy band classifier for CPU/GPU temperature. Retained so older call
+ *  sites still type-check; new code should use `bandFor` directly. */
+export function tempBand(celsius: number): Band {
+    return bandFor(celsius, TEMP_PROFILES.cpu);
 }
 
 /**

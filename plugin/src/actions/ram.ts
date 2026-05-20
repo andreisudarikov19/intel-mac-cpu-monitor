@@ -15,15 +15,15 @@ type Settings = {
     viewMode?: ViewMode;
 };
 
-@action({ UUID: "dev.andreisudarikov.intel-mac-monitor.cpu" })
-export class CPUTempAction extends SingletonAction<Settings> {
+@action({ UUID: "dev.andreisudarikov.intel-mac-monitor.ram" })
+export class RAMTempAction extends SingletonAction<Settings> {
     override onWillAppear(ev: WillAppearEvent<Settings>): Promise<void> | void {
         hub.subscribe(
             {
                 contextId: ev.action.id,
                 setImage: (uri) => ev.action.setImage(uri).then(() => undefined),
             },
-            { kind: "cpu" },
+            { kind: "ram" },
             ev.payload.settings.viewMode ?? "graph",
         );
     }
@@ -42,7 +42,7 @@ export class CPUTempAction extends SingletonAction<Settings> {
                 contextId: ev.action.id,
                 setImage: (uri) => ev.action.setImage(uri).then(() => undefined),
             },
-            { kind: "cpu" },
+            { kind: "ram" },
             s.viewMode ?? "graph",
         );
     }

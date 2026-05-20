@@ -52,6 +52,14 @@ emit(ReadyEvent(
     },
     cpuPackageKey: catalog.cpuPackage?.key,
     gpuSensor: catalog.gpu?.key,
+    ambientSensor: catalog.ambient?.key,
+    ramSensor: catalog.ram?.key,
+    ssdSensor: catalog.ssd?.key,
+    chipsetSensor: catalog.chipset?.key,
+    wifiSensor: catalog.wifi?.key,
+    thunderboltSensor: catalog.thunderbolt?.key,
+    cpuPowerSensor: catalog.cpuPower?.key,
+    gpuPowerSensor: catalog.gpuPower?.key,
     fans: catalog.fans.map { FanInfo(index: $0.index, min: $0.min, max: $0.max) }
 ))
 
@@ -90,19 +98,70 @@ timer.setEventHandler { [smc, catalog] in
         gpu = CatalogProbe.readTemp(reader: smc, entry: entry)
     }
 
+    var ambient: Double? = nil
+    if let entry = catalog.ambient {
+        ambient = CatalogProbe.readTemp(reader: smc, entry: entry)
+    }
+
+    var ram: Double? = nil
+    if let entry = catalog.ram {
+        ram = CatalogProbe.readTemp(reader: smc, entry: entry)
+    }
+
+    var ssd: Double? = nil
+    if let entry = catalog.ssd {
+        ssd = CatalogProbe.readTemp(reader: smc, entry: entry)
+    }
+
+    var chipset: Double? = nil
+    if let entry = catalog.chipset {
+        chipset = CatalogProbe.readTemp(reader: smc, entry: entry)
+    }
+
+    var wifi: Double? = nil
+    if let entry = catalog.wifi {
+        wifi = CatalogProbe.readTemp(reader: smc, entry: entry)
+    }
+
+    var thunderbolt: Double? = nil
+    if let entry = catalog.thunderbolt {
+        thunderbolt = CatalogProbe.readTemp(reader: smc, entry: entry)
+    }
+
+    var cpuPower: Double? = nil
+    if let entry = catalog.cpuPower {
+        cpuPower = CatalogProbe.readPower(reader: smc, entry: entry)
+    }
+
+    var gpuPower: Double? = nil
+    if let entry = catalog.gpuPower {
+        gpuPower = CatalogProbe.readPower(reader: smc, entry: entry)
+    }
+
     let fans: [FanReading] = catalog.fans.map { fan in
         FanReading(i: fan.index, rpm: CatalogProbe.readFanRPM(reader: smc, fan: fan))
     }
 
     // Did anything return a value this tick?
     let anyTemp = cpuAvg != nil || cpuPackage != nil || gpu != nil
+        || ambient != nil || ram != nil || ssd != nil
+        || chipset != nil || wifi != nil || thunderbolt != nil
+    let anyPower = cpuPower != nil || gpuPower != nil
     let anyFan = fans.contains(where: { $0.rpm != nil })
     let catalogHasAnything =
         !catalog.cpuCores.isEmpty ||
         catalog.cpuPackage != nil ||
         catalog.gpu != nil ||
+        catalog.ambient != nil ||
+        catalog.ram != nil ||
+        catalog.ssd != nil ||
+        catalog.chipset != nil ||
+        catalog.wifi != nil ||
+        catalog.thunderbolt != nil ||
+        catalog.cpuPower != nil ||
+        catalog.gpuPower != nil ||
         !catalog.fans.isEmpty
-    if catalogHasAnything && !anyTemp && !anyFan {
+    if catalogHasAnything && !anyTemp && !anyPower && !anyFan {
         let n = failureCounter.increment()
         if n >= consecutiveFailuresThreshold {
             emit(ErrorEvent(
@@ -121,6 +180,14 @@ timer.setEventHandler { [smc, catalog] in
         cpuAvg: cpuAvg,
         cpuPackage: cpuPackage,
         gpu: gpu,
+        ambient: ambient,
+        ram: ram,
+        ssd: ssd,
+        chipset: chipset,
+        wifi: wifi,
+        thunderbolt: thunderbolt,
+        cpuPower: cpuPower,
+        gpuPower: gpuPower,
         fans: fans
     ))
 }

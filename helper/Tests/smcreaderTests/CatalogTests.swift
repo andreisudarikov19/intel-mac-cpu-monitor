@@ -43,6 +43,19 @@ final class MockSMC: SMCReading {
         fixtures[key] = (zeroedBytesWith(b0: b0, b1: b1), "fpe2")
     }
 
+    func setPower(key: String, watts: Float) {
+        // Power keys typically use FLT format on Intel Macs.
+        var v = watts
+        var bytes = (UInt8(0), UInt8(0), UInt8(0), UInt8(0))
+        withUnsafeBytes(of: &v) { buf in
+            bytes = (buf[0], buf[1], buf[2], buf[3])
+        }
+        fixtures[key] = (
+            zeroedBytesWith(b0: bytes.0, b1: bytes.1, b2: bytes.2, b3: bytes.3),
+            "flt "
+        )
+    }
+
     func read(key: String) -> (bytes: SMCBytes, dataType: String)? {
         return fixtures[key]
     }
@@ -132,6 +145,147 @@ struct CatalogTests {
         smc.setTemp(key: "TCGC", celsius: 47)
         let cat = CatalogProbe.probe(reader: smc, t2: true)
         #expect(cat.gpu?.key == "TG0D")
+    }
+
+    @Test func probe_AmbientSensor_DetectedAndPreferenceOrdered() {
+        let smc = MockSMC()
+        // TA1P "exists" but TA0P also exists — prefer TA0P.
+        smc.setTemp(key: "TA0P", celsius: 22)
+        smc.setTemp(key: "TA1P", celsius: 22)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.ambient?.key == "TA0P")
+    }
+
+    @Test func probe_AmbientSensor_AbsentWhenNoKey() {
+        let smc = MockSMC()
+        // No ambient keys at all
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.ambient == nil)
+    }
+
+    @Test func probe_RAMSensor_FallsBackThroughOrder() {
+        let smc = MockSMC()
+        // First-choice Ts0S missing; TM0P should be picked next.
+        smc.setTemp(key: "TM0P", celsius: 37)
+        smc.setTemp(key: "Tm0P", celsius: 35)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.ram?.key == "TM0P")
+    }
+
+    @Test func probe_SSDSensor_PrefersTH0A() {
+        let smc = MockSMC()
+        smc.setTemp(key: "TH0A", celsius: 38)
+        smc.setTemp(key: "TH0F", celsius: 38)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.ssd?.key == "TH0A")
+    }
+
+    @Test func probe_SSDSensor_FallsBackToTH0FOnLegacyMacs() {
+        // Legacy Intel Macs only exposed TH0F. Verify the fallback works.
+        let smc = MockSMC()
+        smc.setTemp(key: "TH0F", celsius: 38)
+        let cat = CatalogProbe.probe(reader: smc, t2: false)
+        #expect(cat.ssd?.key == "TH0F")
+    }
+
+    @Test func probe_ChipsetSensor_PrefersDiode() {
+        let smc = MockSMC()
+        smc.setTemp(key: "TN0D", celsius: 65)
+        smc.setTemp(key: "TN0H", celsius: 60)
+        smc.setTemp(key: "TN0P", celsius: 58)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.chipset?.key == "TN0D")
+    }
+
+    @Test func probe_ChipsetSensor_FallsBackThroughOrder() {
+        // No diode/heatsink, only Tp0P (last resort) — should still be found.
+        let smc = MockSMC()
+        smc.setTemp(key: "Tp0P", celsius: 55)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.chipset?.key == "Tp0P")
+    }
+
+    @Test func probe_WiFiSensor_TW0P() {
+        let smc = MockSMC()
+        smc.setTemp(key: "TW0P", celsius: 42)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.wifi?.key == "TW0P")
+    }
+
+    @Test func probe_ThunderboltSensor_PrefersFirstController() {
+        let smc = MockSMC()
+        smc.setTemp(key: "TI0P", celsius: 48)
+        smc.setTemp(key: "TI1P", celsius: 45)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.thunderbolt?.key == "TI0P")
+    }
+
+    @Test func probe_ThunderboltSensor_MacBookProDualController() {
+        // MacBook Pros with two TB controllers expose left/right diodes.
+        let smc = MockSMC()
+        smc.setTemp(key: "TTLD", celsius: 46)
+        smc.setTemp(key: "TTRD", celsius: 48)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        // TI0P not present → falls through to TTLD (left diode).
+        #expect(cat.thunderbolt?.key == "TTLD")
+    }
+
+    @Test func probe_CPUPower_PCPCFirst() {
+        let smc = MockSMC()
+        smc.setPower(key: "PCPC", watts: 15.5)
+        smc.setPower(key: "PCPT", watts: 16.0)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.cpuPower?.key == "PCPC")
+    }
+
+    @Test func probe_CPUPower_FallsBackToTotal() {
+        let smc = MockSMC()
+        // PCPC missing; PCPT present.
+        smc.setPower(key: "PCPT", watts: 18.0)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.cpuPower?.key == "PCPT")
+    }
+
+    @Test func probe_GPUPower_PrefersDiscrete() {
+        let smc = MockSMC()
+        smc.setPower(key: "PG0C", watts: 25.0)
+        smc.setPower(key: "PCGC", watts: 5.0)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.gpuPower?.key == "PG0C")
+    }
+
+    @Test func probe_GPUPower_FallsBackToIntegrated() {
+        // No discrete; only Intel integrated graphics.
+        let smc = MockSMC()
+        smc.setPower(key: "PCGC", watts: 4.5)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.gpuPower?.key == "PCGC")
+    }
+
+    @Test func probe_Power_AcceptsZeroAtIdle() {
+        // Integrated GPUs can legitimately read 0 W when idle. The probe
+        // must accept that (no >0 filter, just non-negative finite).
+        let smc = MockSMC()
+        smc.setPower(key: "PCGC", watts: 0.0)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.gpuPower?.key == "PCGC")
+    }
+
+    @Test func probe_Power_RejectsImplausiblyHigh() {
+        // A bogus decode that yields 9999 W must NOT be admitted.
+        let smc = MockSMC()
+        smc.setPower(key: "PCPC", watts: 9999.0)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.cpuPower == nil)
+    }
+
+    @Test func readPower_DecodesCurrentValue() {
+        let smc = MockSMC()
+        smc.setPower(key: "PCPC", watts: 12.5)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        let w = CatalogProbe.readPower(reader: smc, entry: cat.cpuPower!)
+        #expect(w != nil)
+        #expect(abs(w! - 12.5) < 0.001)
     }
 
     @Test func probe_FanCount_HonoursSanityBound() {
