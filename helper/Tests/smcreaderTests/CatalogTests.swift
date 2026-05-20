@@ -1,0 +1,203 @@
+import Testing
+@testable import smcreader
+
+/// Mock SMC: returns canned (bytes, dataType) for keys we set up, nil
+/// otherwise. Lets us drive the Catalog probe without IOKit.
+final class MockSMC: SMCReading {
+    var fixtures: [String: (SMCBytes, String)] = [:]
+
+    func setTemp(key: String, celsius: Double, dataType: String = "sp78") {
+        switch dataType {
+        case "sp78":
+            let v = Int16((celsius * 256).rounded())
+            let u = UInt16(bitPattern: v)
+            let b0 = UInt8(u >> 8)
+            let b1 = UInt8(u & 0xFF)
+            fixtures[key] = (zeroedBytesWith(b0: b0, b1: b1), "sp78")
+        case "ui8 ":
+            fixtures[key] = (zeroedBytesWith(b0: UInt8(celsius)), "ui8 ")
+        default:
+            fatalError("unsupported test dataType \(dataType)")
+        }
+    }
+
+    func setRawByte(key: String, b0: UInt8, dataType: String = "ui8 ") {
+        fixtures[key] = (zeroedBytesWith(b0: b0), dataType)
+    }
+
+    func setFltFan(key: String, rpm: Float) {
+        var v = rpm
+        var bytes = (UInt8(0), UInt8(0), UInt8(0), UInt8(0))
+        withUnsafeBytes(of: &v) { buf in
+            bytes = (buf[0], buf[1], buf[2], buf[3])
+        }
+        fixtures[key] = (
+            zeroedBytesWith(b0: bytes.0, b1: bytes.1, b2: bytes.2, b3: bytes.3),
+            "flt "
+        )
+    }
+
+    func setFpe2Fan(key: String, rpm: Int) {
+        let b0 = UInt8(rpm >> 6)
+        let b1 = UInt8((rpm & 0x3F) << 2)
+        fixtures[key] = (zeroedBytesWith(b0: b0, b1: b1), "fpe2")
+    }
+
+    func read(key: String) -> (bytes: SMCBytes, dataType: String)? {
+        return fixtures[key]
+    }
+
+    private func zeroedBytesWith(b0: UInt8 = 0, b1: UInt8 = 0, b2: UInt8 = 0, b3: UInt8 = 0) -> SMCBytes {
+        return (b0, b1, b2, b3, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0)
+    }
+}
+
+@Suite("Catalog probe")
+struct CatalogTests {
+
+    @Test func probe_AllPerCoreLowercase_AreDetected() {
+        let smc = MockSMC()
+        for i in 0...8 { smc.setTemp(key: "TC\(i)c", celsius: 50 + Double(i)) }
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.cpuCores.count == 9)
+        #expect(cat.cpuCores.map(\.key) == [
+            "TC0c", "TC1c", "TC2c", "TC3c", "TC4c", "TC5c", "TC6c", "TC7c", "TC8c"
+        ])
+        #expect(cat.cpuCores.first?.coreIndex == 0)
+    }
+
+    @Test func probe_UppercaseOnlyMac_IsDetected() {
+        let smc = MockSMC()
+        for i in 1...4 { smc.setTemp(key: "TC\(i)C", celsius: 45, dataType: "ui8 ") }
+        let cat = CatalogProbe.probe(reader: smc, t2: false)
+        #expect(cat.cpuCores.count == 4)
+        #expect(cat.cpuCores.map(\.key) == ["TC1C", "TC2C", "TC3C", "TC4C"])
+    }
+
+    @Test func probe_BothCases_PrefersUppercase() {
+        let smc = MockSMC()
+        smc.setTemp(key: "TC0C", celsius: 40)
+        smc.setTemp(key: "TC0c", celsius: 50)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.cpuCores.first?.key == "TC0C")
+    }
+
+    @Test func probe_ZeroOrBelowOneCelsius_IsRejected() {
+        // Sensors reporting always-zero or near-zero (broken/uninstalled)
+        // must not enter the catalogue. Threshold is >1.0°C (Fanny rule).
+        let smc = MockSMC()
+        smc.setTemp(key: "TC0c", celsius: 0)
+        smc.setTemp(key: "TC1c", celsius: 0.5)
+        smc.setTemp(key: "TC2c", celsius: 1.01)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.cpuCores.map(\.key) == ["TC2c"])
+    }
+
+    @Test func probe_NoCores_FallsBackToPackage() {
+        // The T2 case our test hardware demonstrated: no per-core, but a
+        // package sensor exists.
+        let smc = MockSMC()
+        smc.setTemp(key: "TC0F", celsius: 55, dataType: "sp78")
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.cpuCores.isEmpty)
+        #expect(cat.cpuPackage?.key == "TC0F")
+    }
+
+    @Test func probe_PackagePreferenceOrder() {
+        let smc = MockSMC()
+        smc.setTemp(key: "TCAD", celsius: 50)
+        smc.setTemp(key: "TC0F", celsius: 50)
+        smc.setTemp(key: "TC0D", celsius: 50)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.cpuPackage?.key == "TCAD")
+    }
+
+    @Test func probe_PackageSkipsBadKeys() {
+        // Regression test for the bug we hit on real hardware: a key that
+        // exists but decodes to <=1°C must be skipped, not selected.
+        let smc = MockSMC()
+        smc.setTemp(key: "TCAD", celsius: 0)
+        smc.setTemp(key: "TC0F", celsius: 0.5)
+        smc.setTemp(key: "TC0D", celsius: 48)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.cpuPackage?.key == "TC0D")
+    }
+
+    @Test func probe_GPUSensorPreference() {
+        let smc = MockSMC()
+        smc.setTemp(key: "TG0D", celsius: 47)
+        smc.setTemp(key: "TCGC", celsius: 47)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.gpu?.key == "TG0D")
+    }
+
+    @Test func probe_FanCount_HonoursSanityBound() {
+        // FNum reporting 99 is garbage from a misread; must be ignored.
+        let smc = MockSMC()
+        smc.setRawByte(key: "FNum", b0: 99)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.fans.isEmpty)
+    }
+
+    @Test func probe_TwoFans_T2DataType() {
+        let smc = MockSMC()
+        smc.setRawByte(key: "FNum", b0: 2)
+        smc.setFltFan(key: "F0Mn", rpm: 1300)
+        smc.setFltFan(key: "F0Mx", rpm: 6200)
+        smc.setFltFan(key: "F1Mn", rpm: 1300)
+        smc.setFltFan(key: "F1Mx", rpm: 6200)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.fans.count == 2)
+        #expect(cat.fans[0].min == 1300)
+        #expect(cat.fans[0].max == 6200)
+        #expect(cat.fans[0].dataType == "flt ")
+    }
+
+    @Test func probe_FanWithOnlyMin_isIncluded() {
+        let smc = MockSMC()
+        smc.setRawByte(key: "FNum", b0: 1)
+        smc.setFltFan(key: "F0Mn", rpm: 1200)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.fans.count == 1)
+        #expect(cat.fans[0].min == 1200)
+        #expect(cat.fans[0].max == nil)
+    }
+
+    @Test func readTemp_DecodesUsingCatalogedDataType() {
+        // The probe caches dataType so per-tick reads decode correctly even
+        // for SP78 keys whose byte0 alone would mislead.
+        let smc = MockSMC()
+        smc.setTemp(key: "TC0c", celsius: 45.3125, dataType: "sp78")
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        let entry = cat.cpuCores.first!
+        let reading = CatalogProbe.readTemp(reader: smc, entry: entry)
+        #expect(reading != nil)
+        #expect(abs(reading! - 45.3125) < 0.001)
+    }
+
+    @Test func readFanRPM_FltFan() {
+        let smc = MockSMC()
+        smc.setRawByte(key: "FNum", b0: 1)
+        smc.setFltFan(key: "F0Mn", rpm: 1200)
+        smc.setFltFan(key: "F0Mx", rpm: 2700)
+        smc.setFltFan(key: "F0Ac", rpm: 1845)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        let rpm = CatalogProbe.readFanRPM(reader: smc, fan: cat.fans[0])
+        #expect(rpm == 1845)
+    }
+
+    @Test func readFanRPM_Fpe2Fan() {
+        let smc = MockSMC()
+        smc.setRawByte(key: "FNum", b0: 1)
+        smc.setFpe2Fan(key: "F0Mn", rpm: 1200)
+        smc.setFpe2Fan(key: "F0Mx", rpm: 2700)
+        smc.setFpe2Fan(key: "F0Ac", rpm: 1844) // fpe2 has 4-RPM granularity at high values
+        let cat = CatalogProbe.probe(reader: smc, t2: false)
+        let rpm = CatalogProbe.readFanRPM(reader: smc, fan: cat.fans[0])
+        #expect(rpm != nil)
+        #expect(abs(rpm! - 1844) <= 1)
+    }
+}

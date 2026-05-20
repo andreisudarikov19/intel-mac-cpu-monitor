@@ -1,0 +1,15 @@
+{
+  "name": "intel-mac-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stream Deck plugin showing live CPU/GPU temperature and fan speed on Intel Macs.",
+  "scripts": {
+    "build:helper": "cd helper && swift build -c release && cp .build/release/smcreader ../dev.andreisudarikov.intel-mac-monitor.sdPlugin/bin/mac/smcreader",
+    "build:plugin": "cd plugin && npm install && npm run build",
+    "build": "npm run build:helper && npm run build:plugin",
+    "test:helper": "cd helper && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test",
+    "test:plugin": "cd plugin && npx vitest run",
+    "test": "npm run test:helper && npm run test:plugin",
+    "clean": "rm -rf helper/.build plugin/node_modules dev.andreisudarikov.intel-mac-monitor.sdPlugin/bin/plugin.js dev.andreisudarikov.intel-mac-monitor.sdPlugin/bin/mac/smcreader"
+  }
+}

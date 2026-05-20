@@ -1,0 +1,22 @@
+{
+  "name": "intel-mac-monitor-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "rolldown -c rolldown.config.ts",
+    "watch": "rolldown -c rolldown.config.ts -w",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@tsconfig/node20": "^20.1.4",
+    "@types/node": "^20.19.0",
+    "rolldown": "^1.0.0-rc.6",
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.0"
+  },
+  "dependencies": {
+    "@elgato/streamdeck": "^2.0.0"
+  }
+}
