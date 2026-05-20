@@ -17,6 +17,8 @@ struct ProtocolTests {
             chipsetSensor: "TN0P",
             wifiSensor: "TW0P",
             thunderboltSensor: "TI0P",
+            cpuPowerSensor: "PCPC",
+            gpuPowerSensor: "PG0C",
             fans: [FanInfo(index: 0, min: 1200, max: 2700)]
         )
         let line = encodeOneLine(ev)
@@ -32,6 +34,7 @@ struct ProtocolTests {
             cpuPackageKey: nil, gpuSensor: nil,
             ambientSensor: nil, ramSensor: nil, ssdSensor: nil,
             chipsetSensor: nil, wifiSensor: nil, thunderboltSensor: nil,
+            cpuPowerSensor: nil, gpuPowerSensor: nil,
             fans: []
         )
         let line = encodeOneLine(ev)!
@@ -53,6 +56,8 @@ struct ProtocolTests {
             chipset: 65.0,
             wifi: 42.0,
             thunderbolt: 48.0,
+            cpuPower: 25.0,
+            gpuPower: 18.5,
             fans: [FanReading(i: 0, rpm: 1200)]
         )
         let line = encodeOneLine(ev)!
@@ -68,6 +73,8 @@ struct ProtocolTests {
         #expect(line.contains("\"chipset\":65"))
         #expect(line.contains("\"wifi\":42"))
         #expect(line.contains("\"thunderbolt\":48"))
+        #expect(line.contains("\"cpuPower\":25"))
+        #expect(line.contains("\"gpuPower\":18.5"))
     }
 
     @Test func readingEvent_NilFields_areOmitted() {
@@ -79,6 +86,7 @@ struct ProtocolTests {
             ts: 1, cpu: [:], cpuAvg: nil, cpuPackage: nil, gpu: nil,
             ambient: nil, ram: nil, ssd: nil,
             chipset: nil, wifi: nil, thunderbolt: nil,
+            cpuPower: nil, gpuPower: nil,
             fans: []
         )
         let line = encodeOneLine(ev)!
@@ -91,6 +99,8 @@ struct ProtocolTests {
         #expect(line.contains("\"chipset\"") == false)
         #expect(line.contains("\"wifi\"") == false)
         #expect(line.contains("\"thunderbolt\"") == false)
+        #expect(line.contains("\"cpuPower\"") == false)
+        #expect(line.contains("\"gpuPower\"") == false)
     }
 
     @Test func fanReading_NilRPM_isOmitted() {
@@ -98,6 +108,7 @@ struct ProtocolTests {
             ts: 1, cpu: [:], cpuAvg: nil, cpuPackage: nil, gpu: nil,
             ambient: nil, ram: nil, ssd: nil,
             chipset: nil, wifi: nil, thunderbolt: nil,
+            cpuPower: nil, gpuPower: nil,
             fans: [FanReading(i: 0, rpm: nil)]
         )
         let line = encodeOneLine(ev)!

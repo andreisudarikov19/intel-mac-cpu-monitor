@@ -108,6 +108,27 @@ struct DecodersTests {
         #expect(v == nil)
     }
 
+    // MARK: - decodePower
+
+    @Test func decodePower_FLT_RealValue() {
+        // 12.5 W as IEEE 754 little-endian float = 0x00 0x00 0x48 0x41
+        let v = Decoders.decodePower(b0: 0x00, b1: 0x00, b2: 0x48, b3: 0x41, dataType: "flt ")
+        #expect(v != nil)
+        #expect(abs(v! - 12.5) < 0.001)
+    }
+
+    @Test func decodePower_FLT_NaN_ReturnsNil() {
+        let v = Decoders.decodePower(b0: 0xFF, b1: 0xFF, b2: 0xFF, b3: 0x7F, dataType: "flt ")
+        #expect(v == nil)
+    }
+
+    @Test func decodePower_SP78_FractionalValue() {
+        // 5.5 W as SP78: 0x05 0x80 → (5 * 256 + 128) / 256 = 5.5
+        let v = Decoders.decodePower(b0: 0x05, b1: 0x80, b2: 0, b3: 0, dataType: "sp78")
+        #expect(v != nil)
+        #expect(abs(v! - 5.5) < 0.001)
+    }
+
     // MARK: - SP78 edge cases (review LOW #9)
 
     @Test func decodeSP78_MinimumNegative() {

@@ -184,6 +184,81 @@ describe("renderSVG value-only view", () => {
     });
 });
 
+describe("renderSVG meter (VU) view", () => {
+    // For meter view we need POWER_PROFILES and a numeric rawValue.
+    // Helper to construct a representative meter input.
+    const makeMeterInput = (rawValue: number | null, range = { min: 0, max: 150 }): RenderInput => ({
+        label: "CPU",
+        valueText: rawValue == null ? "" : `${Math.round(rawValue)}W`,
+        band: "cool",
+        noData: rawValue == null,
+        samples: [],
+        range,
+        viewMode: "meter",
+        rawValue,
+        profile: { range, coolMax: 30, warmMax: 70, hotMax: 110 },
+    });
+
+    it("renders 12 segments (the VU column)", () => {
+        const svg = renderSVG(makeMeterInput(50));
+        // Segments are <rect> with fill-opacity attributes (not the bg or
+        // value text, neither of which use fill-opacity). Count those.
+        const segmentCount = (svg.match(/fill-opacity="/g) ?? []).length;
+        expect(segmentCount).toBe(12);
+    });
+
+    it("lights up a proportional number of segments based on value", () => {
+        // 75/150 = 0.5 ⇒ ~6 lit segments out of 12.
+        const svg = renderSVG(makeMeterInput(75));
+        const litCount = (svg.match(/fill-opacity="1"/g) ?? []).length;
+        const dimCount = (svg.match(/fill-opacity="0\.18"/g) ?? []).length;
+        expect(litCount + dimCount).toBe(12);
+        // Allow ±1 segment for rounding.
+        expect(litCount).toBeGreaterThanOrEqual(5);
+        expect(litCount).toBeLessThanOrEqual(7);
+    });
+
+    it("lights no segments at value 0", () => {
+        const svg = renderSVG(makeMeterInput(0));
+        const litCount = (svg.match(/fill-opacity="1"/g) ?? []).length;
+        expect(litCount).toBe(0);
+    });
+
+    it("lights all 12 segments at or above the range max", () => {
+        const svg = renderSVG(makeMeterInput(200));  // > range max 150
+        const litCount = (svg.match(/fill-opacity="1"/g) ?? []).length;
+        expect(litCount).toBe(12);
+    });
+
+    it("assigns per-segment colors so the column transitions cool→warm→hot→critical bottom-up", () => {
+        const svg = renderSVG(makeMeterInput(150));  // all lit
+        // The column should contain all four band colors at full opacity.
+        // Use a permissive check: each color appears at least once.
+        expect(svg).toContain(COLORS.cool);
+        expect(svg).toContain(COLORS.warm);
+        expect(svg).toContain(COLORS.hot);
+        expect(svg).toContain(COLORS.critical);
+    });
+
+    it("noData mode hides the value text but still draws the column skeleton", () => {
+        const svg = renderSVG(makeMeterInput(null));
+        // Header switches to alert color
+        expect(svg).toContain(NO_DATA_COLOR);
+        expect(svg).toContain(">No data<");
+        // All 12 segments still drawn (as dim outlines)
+        const segmentCount = (svg.match(/fill-opacity="/g) ?? []).length;
+        expect(segmentCount).toBe(12);
+        // No lit segments
+        const litCount = (svg.match(/fill-opacity="1"/g) ?? []).length;
+        expect(litCount).toBe(0);
+    });
+
+    it("omits sparkline paths (meter ≠ graph)", () => {
+        const svg = renderSVG(makeMeterInput(50));
+        expect(svg).not.toMatch(/<path/);
+    });
+});
+
 describe("svgDataUri", () => {
     it("produces a data: URI with the svg+xml MIME and base64 payload", () => {
         const uri = svgDataUri("<svg/>");

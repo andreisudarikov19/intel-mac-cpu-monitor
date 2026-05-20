@@ -43,6 +43,19 @@ final class MockSMC: SMCReading {
         fixtures[key] = (zeroedBytesWith(b0: b0, b1: b1), "fpe2")
     }
 
+    func setPower(key: String, watts: Float) {
+        // Power keys typically use FLT format on Intel Macs.
+        var v = watts
+        var bytes = (UInt8(0), UInt8(0), UInt8(0), UInt8(0))
+        withUnsafeBytes(of: &v) { buf in
+            bytes = (buf[0], buf[1], buf[2], buf[3])
+        }
+        fixtures[key] = (
+            zeroedBytesWith(b0: bytes.0, b1: bytes.1, b2: bytes.2, b3: bytes.3),
+            "flt "
+        )
+    }
+
     func read(key: String) -> (bytes: SMCBytes, dataType: String)? {
         return fixtures[key]
     }
@@ -215,6 +228,64 @@ struct CatalogTests {
         let cat = CatalogProbe.probe(reader: smc, t2: true)
         // TI0P not present → falls through to TTLD (left diode).
         #expect(cat.thunderbolt?.key == "TTLD")
+    }
+
+    @Test func probe_CPUPower_PCPCFirst() {
+        let smc = MockSMC()
+        smc.setPower(key: "PCPC", watts: 15.5)
+        smc.setPower(key: "PCPT", watts: 16.0)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.cpuPower?.key == "PCPC")
+    }
+
+    @Test func probe_CPUPower_FallsBackToTotal() {
+        let smc = MockSMC()
+        // PCPC missing; PCPT present.
+        smc.setPower(key: "PCPT", watts: 18.0)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.cpuPower?.key == "PCPT")
+    }
+
+    @Test func probe_GPUPower_PrefersDiscrete() {
+        let smc = MockSMC()
+        smc.setPower(key: "PG0C", watts: 25.0)
+        smc.setPower(key: "PCGC", watts: 5.0)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.gpuPower?.key == "PG0C")
+    }
+
+    @Test func probe_GPUPower_FallsBackToIntegrated() {
+        // No discrete; only Intel integrated graphics.
+        let smc = MockSMC()
+        smc.setPower(key: "PCGC", watts: 4.5)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.gpuPower?.key == "PCGC")
+    }
+
+    @Test func probe_Power_AcceptsZeroAtIdle() {
+        // Integrated GPUs can legitimately read 0 W when idle. The probe
+        // must accept that (no >0 filter, just non-negative finite).
+        let smc = MockSMC()
+        smc.setPower(key: "PCGC", watts: 0.0)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.gpuPower?.key == "PCGC")
+    }
+
+    @Test func probe_Power_RejectsImplausiblyHigh() {
+        // A bogus decode that yields 9999 W must NOT be admitted.
+        let smc = MockSMC()
+        smc.setPower(key: "PCPC", watts: 9999.0)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.cpuPower == nil)
+    }
+
+    @Test func readPower_DecodesCurrentValue() {
+        let smc = MockSMC()
+        smc.setPower(key: "PCPC", watts: 12.5)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        let w = CatalogProbe.readPower(reader: smc, entry: cat.cpuPower!)
+        #expect(w != nil)
+        #expect(abs(w! - 12.5) < 0.001)
     }
 
     @Test func probe_FanCount_HonoursSanityBound() {

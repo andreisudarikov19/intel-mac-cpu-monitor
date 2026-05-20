@@ -73,4 +73,19 @@ struct SensorsTests {
         #expect(Sensors.thunderboltKeysInPreferenceOrder.contains("TTLD"))
         #expect(Sensors.thunderboltKeysInPreferenceOrder.contains("TTRD"))
     }
+
+    @Test func cpuPowerPreference_PackageFirst() {
+        // PCPC = CPU Package power. Most accurate for "CPU draw" on
+        // Intel Macs. Other variants follow as fallbacks.
+        #expect(Sensors.cpuPowerKeysInPreferenceOrder.first == "PCPC")
+        #expect(Sensors.cpuPowerKeysInPreferenceOrder.contains("PCPT"))
+    }
+
+    @Test func gpuPowerPreference_DiscreteFirst() {
+        // PG0C = discrete GPU. Integrated GPU keys (PCGC/PCPG) come
+        // after, so Macs with both pick up the discrete card.
+        #expect(Sensors.gpuPowerKeysInPreferenceOrder.first == "PG0C")
+        #expect(Sensors.gpuPowerKeysInPreferenceOrder.contains("PCGC"))
+        #expect(Sensors.gpuPowerKeysInPreferenceOrder.contains("PCPG"))
+    }
 }

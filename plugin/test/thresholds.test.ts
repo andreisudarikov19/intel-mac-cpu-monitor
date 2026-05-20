@@ -2,11 +2,13 @@ import { describe, it, expect } from "vitest";
 import {
     tempBand,
     tempBandFor,
+    bandFor,
     fanBand,
     cToF,
     COLORS,
     TEMP_RANGE,
     TEMP_PROFILES,
+    POWER_PROFILES,
 } from "../src/thresholds.js";
 
 describe("temperature bands", () => {
@@ -170,5 +172,30 @@ describe("per-sensor temperature profiles", () => {
         for (const c of [30, 60, 60.1, 80, 80.1, 95, 95.1, 110]) {
             expect(tempBand(c)).toBe(tempBandFor(c, TEMP_PROFILES.cpu));
         }
+    });
+});
+
+describe("power profiles", () => {
+    it("CPU power: 5W idle cool, 50W warm, 90W hot, 120W critical", () => {
+        const p = POWER_PROFILES.cpu;
+        expect(bandFor(5, p)).toBe("cool");
+        expect(bandFor(30, p)).toBe("cool");
+        expect(bandFor(50, p)).toBe("warm");
+        expect(bandFor(90, p)).toBe("hot");
+        expect(bandFor(120, p)).toBe("critical");
+    });
+
+    it("GPU power: bands tuned higher than CPU (discrete cards pull more)", () => {
+        const p = POWER_PROFILES.gpu;
+        expect(bandFor(5, p)).toBe("cool");
+        expect(bandFor(50, p)).toBe("warm");
+        expect(bandFor(120, p)).toBe("hot");
+        expect(bandFor(180, p)).toBe("critical");
+    });
+
+    it("power profiles never enter the cold band (only ambient air does)", () => {
+        // 0 W reads as cool, never cold.
+        expect(bandFor(0, POWER_PROFILES.cpu)).toBe("cool");
+        expect(bandFor(0, POWER_PROFILES.gpu)).toBe("cool");
     });
 });
