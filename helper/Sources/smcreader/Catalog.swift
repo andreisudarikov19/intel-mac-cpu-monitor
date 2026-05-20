@@ -7,6 +7,14 @@ struct SensorCatalog {
     let cpuCores: [SensorEntry]
     let cpuPackage: SensorEntry?
     let gpu: SensorEntry?
+    let ambient: SensorEntry?
+    let ram: SensorEntry?
+    let ssd: SensorEntry?
+    let chipset: SensorEntry?
+    let wifi: SensorEntry?
+    let thunderbolt: SensorEntry?
+    let cpuPower: SensorEntry?
+    let gpuPower: SensorEntry?
     let fans: [FanCatalogEntry]
     let t2: Bool
 }
@@ -55,6 +63,70 @@ enum CatalogProbe {
             }
         }
 
+        var ambientEntry: SensorEntry? = nil
+        for key in Sensors.ambientKeysInPreferenceOrder {
+            if let entry = tryTempSensor(reader: reader, key: key, coreIndex: nil) {
+                ambientEntry = entry
+                break
+            }
+        }
+
+        var ramEntry: SensorEntry? = nil
+        for key in Sensors.ramKeysInPreferenceOrder {
+            if let entry = tryTempSensor(reader: reader, key: key, coreIndex: nil) {
+                ramEntry = entry
+                break
+            }
+        }
+
+        var ssdEntry: SensorEntry? = nil
+        for key in Sensors.ssdKeysInPreferenceOrder {
+            if let entry = tryTempSensor(reader: reader, key: key, coreIndex: nil) {
+                ssdEntry = entry
+                break
+            }
+        }
+
+        var chipsetEntry: SensorEntry? = nil
+        for key in Sensors.chipsetKeysInPreferenceOrder {
+            if let entry = tryTempSensor(reader: reader, key: key, coreIndex: nil) {
+                chipsetEntry = entry
+                break
+            }
+        }
+
+        var wifiEntry: SensorEntry? = nil
+        for key in Sensors.wifiKeysInPreferenceOrder {
+            if let entry = tryTempSensor(reader: reader, key: key, coreIndex: nil) {
+                wifiEntry = entry
+                break
+            }
+        }
+
+        var thunderboltEntry: SensorEntry? = nil
+        for key in Sensors.thunderboltKeysInPreferenceOrder {
+            if let entry = tryTempSensor(reader: reader, key: key, coreIndex: nil) {
+                thunderboltEntry = entry
+                break
+            }
+        }
+
+        var cpuPowerEntry: SensorEntry? = nil
+        for key in Sensors.cpuPowerKeysInPreferenceOrder {
+            if let entry = tryPowerSensor(reader: reader, key: key) {
+                cpuPowerEntry = entry
+                break
+            }
+        }
+
+        var gpuPowerEntry: SensorEntry? = nil
+        for key in Sensors.gpuPowerKeysInPreferenceOrder {
+            if let entry = tryPowerSensor(reader: reader, key: key) {
+                gpuPowerEntry = entry
+                break
+            }
+        }
+
         var fans: [FanCatalogEntry] = []
         if let countResult = reader.read(key: Sensors.fanCountKey) {
             let count = Int(countResult.bytes.0)
@@ -78,8 +150,42 @@ enum CatalogProbe {
             cpuCores: cores,
             cpuPackage: packageEntry,
             gpu: gpuEntry,
+            ambient: ambientEntry,
+            ram: ramEntry,
+            ssd: ssdEntry,
+            chipset: chipsetEntry,
+            wifi: wifiEntry,
+            thunderbolt: thunderboltEntry,
+            cpuPower: cpuPowerEntry,
+            gpuPower: gpuPowerEntry,
             fans: fans,
             t2: t2
+        )
+    }
+
+    /// Try a power SMC key. Returns a populated SensorEntry only if the
+    /// key exists AND decodes to a sensible non-negative wattage. We do
+    /// NOT require >0 because some integrated GPUs idle at exactly 0 W.
+    static func tryPowerSensor(reader: SMCReading, key: String) -> SensorEntry? {
+        guard let r = reader.read(key: key) else { return nil }
+        guard let w = Decoders.decodePower(
+            b0: r.bytes.0, b1: r.bytes.1, b2: r.bytes.2, b3: r.bytes.3,
+            dataType: r.dataType
+        ) else { return nil }
+        // Defensive: reject implausibly large values (>1 kW would
+        // indicate a decode error, not a real Mac power reading).
+        if w >= 0 && w < 1000 {
+            return SensorEntry(key: key, dataType: r.dataType, coreIndex: nil)
+        }
+        return nil
+    }
+
+    /// Read and decode current power (watts) from a catalogued power entry.
+    static func readPower(reader: SMCReading, entry: SensorEntry) -> Double? {
+        guard let r = reader.read(key: entry.key) else { return nil }
+        return Decoders.decodePower(
+            b0: r.bytes.0, b1: r.bytes.1, b2: r.bytes.2, b3: r.bytes.3,
+            dataType: r.dataType
         )
     }
 

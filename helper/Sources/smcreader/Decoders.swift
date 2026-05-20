@@ -70,6 +70,31 @@ enum Decoders {
         return raw
     }
 
+    // MARK: - Power decoders
+
+    /// Decode a power reading (watts) by dataType. Most modern Intel-Mac
+    /// power keys use FLT (4-byte IEEE float). Returns nil for non-finite
+    /// results.
+    static func decodePower(b0: UInt8, b1: UInt8, b2: UInt8, b3: UInt8, dataType: String) -> Double? {
+        let raw: Double
+        switch dataType {
+        case "flt ":
+            let f = decodeFltAsFloat(b0: b0, b1: b1, b2: b2, b3: b3)
+            if f.isNaN || f.isInfinite { return nil }
+            raw = Double(f)
+        case "sp78":
+            raw = decodeSP78(b0: b0, b1: b1)
+        case let t where t.hasPrefix("ui8"):
+            raw = decodeUI8(b0: b0)
+        default:
+            // Last-resort fallback — calibration may be off but better
+            // than dropping the reading entirely.
+            raw = decodeUI8(b0: b0)
+        }
+        if raw.isNaN || raw.isInfinite { return nil }
+        return raw
+    }
+
     // MARK: - Fan decoders
 
     /// Decode a fan RPM value in legacy "fpe2" format (pre-T2 Intel Macs).

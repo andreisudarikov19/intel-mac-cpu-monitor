@@ -66,6 +66,110 @@
       "States": [
         { "Image": "imgs/actions/fan/key", "TitleAlignment": "middle" }
       ]
+    },
+    {
+      "Name": "Air Temp",
+      "UUID": "dev.andreisudarikov.intel-mac-monitor.air",
+      "Icon": "imgs/actions/air/icon",
+      "Tooltip": "Ambient/intake air temperature (Intel only).",
+      "PropertyInspectorPath": "ui/air.html",
+      "Controllers": ["Keypad"],
+      "UserTitleEnabled": false,
+      "DisableCaching": true,
+      "States": [
+        { "Image": "imgs/actions/air/key", "TitleAlignment": "middle" }
+      ]
+    },
+    {
+      "Name": "RAM Temp",
+      "UUID": "dev.andreisudarikov.intel-mac-monitor.ram",
+      "Icon": "imgs/actions/ram/icon",
+      "Tooltip": "Memory module temperature (Intel only).",
+      "PropertyInspectorPath": "ui/ram.html",
+      "Controllers": ["Keypad"],
+      "UserTitleEnabled": false,
+      "DisableCaching": true,
+      "States": [
+        { "Image": "imgs/actions/ram/key", "TitleAlignment": "middle" }
+      ]
+    },
+    {
+      "Name": "SSD Temp",
+      "UUID": "dev.andreisudarikov.intel-mac-monitor.ssd",
+      "Icon": "imgs/actions/ssd/icon",
+      "Tooltip": "Storage/SSD temperature (Intel only).",
+      "PropertyInspectorPath": "ui/ssd.html",
+      "Controllers": ["Keypad"],
+      "UserTitleEnabled": false,
+      "DisableCaching": true,
+      "States": [
+        { "Image": "imgs/actions/ssd/key", "TitleAlignment": "middle" }
+      ]
+    },
+    {
+      "Name": "Chipset Temp",
+      "UUID": "dev.andreisudarikov.intel-mac-monitor.chipset",
+      "Icon": "imgs/actions/chipset/icon",
+      "Tooltip": "Chipset / PCH / Northbridge temperature (Intel only).",
+      "PropertyInspectorPath": "ui/chipset.html",
+      "Controllers": ["Keypad"],
+      "UserTitleEnabled": false,
+      "DisableCaching": true,
+      "States": [
+        { "Image": "imgs/actions/chipset/key", "TitleAlignment": "middle" }
+      ]
+    },
+    {
+      "Name": "Wi-Fi Temp",
+      "UUID": "dev.andreisudarikov.intel-mac-monitor.wifi",
+      "Icon": "imgs/actions/wifi/icon",
+      "Tooltip": "Wi-Fi card temperature (Intel only).",
+      "PropertyInspectorPath": "ui/wifi.html",
+      "Controllers": ["Keypad"],
+      "UserTitleEnabled": false,
+      "DisableCaching": true,
+      "States": [
+        { "Image": "imgs/actions/wifi/key", "TitleAlignment": "middle" }
+      ]
+    },
+    {
+      "Name": "Thunderbolt Temp",
+      "UUID": "dev.andreisudarikov.intel-mac-monitor.thunderbolt",
+      "Icon": "imgs/actions/thunderbolt/icon",
+      "Tooltip": "Thunderbolt controller temperature (Intel only).",
+      "PropertyInspectorPath": "ui/thunderbolt.html",
+      "Controllers": ["Keypad"],
+      "UserTitleEnabled": false,
+      "DisableCaching": true,
+      "States": [
+        { "Image": "imgs/actions/thunderbolt/key", "TitleAlignment": "middle" }
+      ]
+    },
+    {
+      "Name": "CPU Power",
+      "UUID": "dev.andreisudarikov.intel-mac-monitor.cpu-power",
+      "Icon": "imgs/actions/cpu-power/icon",
+      "Tooltip": "CPU power draw in watts; tap for VU-meter view (Intel only).",
+      "PropertyInspectorPath": "ui/cpu-power.html",
+      "Controllers": ["Keypad"],
+      "UserTitleEnabled": false,
+      "DisableCaching": true,
+      "States": [
+        { "Image": "imgs/actions/cpu-power/key", "TitleAlignment": "middle" }
+      ]
+    },
+    {
+      "Name": "GPU Power",
+      "UUID": "dev.andreisudarikov.intel-mac-monitor.gpu-power",
+      "Icon": "imgs/actions/gpu-power/icon",
+      "Tooltip": "GPU power draw in watts; tap for VU-meter view (Intel only).",
+      "PropertyInspectorPath": "ui/gpu-power.html",
+      "Controllers": ["Keypad"],
+      "UserTitleEnabled": false,
+      "DisableCaching": true,
+      "States": [
+        { "Image": "imgs/actions/gpu-power/key", "TitleAlignment": "middle" }
+      ]
     }
   ]
 }

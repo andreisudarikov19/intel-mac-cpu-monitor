@@ -134,6 +134,89 @@ struct CatalogTests {
         #expect(cat.gpu?.key == "TG0D")
     }
 
+    @Test func probe_AmbientSensor_DetectedAndPreferenceOrdered() {
+        let smc = MockSMC()
+        // TA1P "exists" but TA0P also exists — prefer TA0P.
+        smc.setTemp(key: "TA0P", celsius: 22)
+        smc.setTemp(key: "TA1P", celsius: 22)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.ambient?.key == "TA0P")
+    }
+
+    @Test func probe_AmbientSensor_AbsentWhenNoKey() {
+        let smc = MockSMC()
+        // No ambient keys at all
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.ambient == nil)
+    }
+
+    @Test func probe_RAMSensor_FallsBackThroughOrder() {
+        let smc = MockSMC()
+        // First-choice Ts0S missing; TM0P should be picked next.
+        smc.setTemp(key: "TM0P", celsius: 37)
+        smc.setTemp(key: "Tm0P", celsius: 35)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.ram?.key == "TM0P")
+    }
+
+    @Test func probe_SSDSensor_PrefersTH0A() {
+        let smc = MockSMC()
+        smc.setTemp(key: "TH0A", celsius: 38)
+        smc.setTemp(key: "TH0F", celsius: 38)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.ssd?.key == "TH0A")
+    }
+
+    @Test func probe_SSDSensor_FallsBackToTH0FOnLegacyMacs() {
+        // Legacy Intel Macs only exposed TH0F. Verify the fallback works.
+        let smc = MockSMC()
+        smc.setTemp(key: "TH0F", celsius: 38)
+        let cat = CatalogProbe.probe(reader: smc, t2: false)
+        #expect(cat.ssd?.key == "TH0F")
+    }
+
+    @Test func probe_ChipsetSensor_PrefersDiode() {
+        let smc = MockSMC()
+        smc.setTemp(key: "TN0D", celsius: 65)
+        smc.setTemp(key: "TN0H", celsius: 60)
+        smc.setTemp(key: "TN0P", celsius: 58)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.chipset?.key == "TN0D")
+    }
+
+    @Test func probe_ChipsetSensor_FallsBackThroughOrder() {
+        // No diode/heatsink, only Tp0P (last resort) — should still be found.
+        let smc = MockSMC()
+        smc.setTemp(key: "Tp0P", celsius: 55)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.chipset?.key == "Tp0P")
+    }
+
+    @Test func probe_WiFiSensor_TW0P() {
+        let smc = MockSMC()
+        smc.setTemp(key: "TW0P", celsius: 42)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.wifi?.key == "TW0P")
+    }
+
+    @Test func probe_ThunderboltSensor_PrefersFirstController() {
+        let smc = MockSMC()
+        smc.setTemp(key: "TI0P", celsius: 48)
+        smc.setTemp(key: "TI1P", celsius: 45)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(cat.thunderbolt?.key == "TI0P")
+    }
+
+    @Test func probe_ThunderboltSensor_MacBookProDualController() {
+        // MacBook Pros with two TB controllers expose left/right diodes.
+        let smc = MockSMC()
+        smc.setTemp(key: "TTLD", celsius: 46)
+        smc.setTemp(key: "TTRD", celsius: 48)
+        let cat = CatalogProbe.probe(reader: smc, t2: true)
+        // TI0P not present → falls through to TTLD (left diode).
+        #expect(cat.thunderbolt?.key == "TTLD")
+    }
+
     @Test func probe_FanCount_HonoursSanityBound() {
         // FNum reporting 99 is garbage from a misread; must be ignored.
         let smc = MockSMC()

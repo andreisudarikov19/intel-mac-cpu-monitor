@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
     tempBand,
+    tempBandFor,
     fanBand,
     cToF,
     COLORS,
     TEMP_RANGE,
+    TEMP_PROFILES,
 } from "../src/thresholds.js";
 
 describe("temperature bands", () => {
@@ -76,13 +78,97 @@ describe("unit conversion", () => {
 describe("constants", () => {
     it("color palette is complete", () => {
         // Every band must have a color or the renderer crashes.
+        expect(COLORS.cold).toMatch(/^#[0-9a-f]{6}$/i);
         expect(COLORS.cool).toMatch(/^#[0-9a-f]{6}$/i);
         expect(COLORS.warm).toMatch(/^#[0-9a-f]{6}$/i);
         expect(COLORS.hot).toMatch(/^#[0-9a-f]{6}$/i);
         expect(COLORS.critical).toMatch(/^#[0-9a-f]{6}$/i);
     });
 
-    it("TEMP_RANGE matches spec (30–100°C)", () => {
+    it("legacy TEMP_RANGE matches CPU profile (30–100°C)", () => {
         expect(TEMP_RANGE).toEqual({ min: 30, max: 100 });
+        expect(TEMP_PROFILES.cpu.range).toEqual({ min: 30, max: 100 });
+    });
+});
+
+describe("per-sensor temperature profiles", () => {
+    // Each sensor type has its own band thresholds tuned to that sensor's
+    // typical operating range. The renderer's Y-axis uses each profile's
+    // range so the graph is meaningfully filled at idle.
+
+    it("ambient: includes a 'cold' band below 20°C", () => {
+        const p = TEMP_PROFILES.ambient;
+        // 13°C (our test hardware's actual ambient reading) must be cold.
+        expect(tempBandFor(13, p)).toBe("cold");
+        // 0°C and 19°C also cold.
+        expect(tempBandFor(0, p)).toBe("cold");
+        expect(tempBandFor(19, p)).toBe("cold");
+        // 20°C is still cold (≤ coldMax).
+        expect(tempBandFor(20, p)).toBe("cold");
+        // 20.1°C tips into cool.
+        expect(tempBandFor(20.1, p)).toBe("cool");
+    });
+
+    it("ambient: cool/warm/hot/critical thresholds on a 0–100°C range", () => {
+        const p = TEMP_PROFILES.ambient;
+        // Typical room (22°C) → cool
+        expect(tempBandFor(22, p)).toBe("cool");
+        // Comfortable upper bound (30°C) → cool
+        expect(tempBandFor(30, p)).toBe("cool");
+        // Hot day / sun-warmed intake (40°C) → warm
+        expect(tempBandFor(40, p)).toBe("warm");
+        // Definitely too warm (60°C) → hot
+        expect(tempBandFor(60, p)).toBe("hot");
+        // Failure territory (80°C) → critical
+        expect(tempBandFor(80, p)).toBe("critical");
+    });
+
+    it("ambient: range is 0–100°C to match CPU/GPU height semantics", () => {
+        // Cross-sensor visual comparability: same line height = same
+        // fraction of range across every temp action.
+        expect(TEMP_PROFILES.ambient.range).toEqual({ min: 0, max: 100 });
+    });
+
+    it("non-ambient profiles never enter the cold band", () => {
+        // CPU/GPU/RAM/SSD/chipset/wifi/tbolt have no coldMax, so even
+        // -50°C (nonsensical for an Intel Mac) reads as "cool", not "cold".
+        expect(tempBandFor(-50, TEMP_PROFILES.cpu)).toBe("cool");
+        expect(tempBandFor(-50, TEMP_PROFILES.gpu)).toBe("cool");
+        expect(tempBandFor(-50, TEMP_PROFILES.ram)).toBe("cool");
+        expect(tempBandFor(-50, TEMP_PROFILES.ssd)).toBe("cool");
+        expect(tempBandFor(-50, TEMP_PROFILES.chipset)).toBe("cool");
+        expect(tempBandFor(-50, TEMP_PROFILES.wifi)).toBe("cool");
+        expect(tempBandFor(-50, TEMP_PROFILES.thunderbolt)).toBe("cool");
+    });
+
+    it("chipset/wifi/thunderbolt profiles have sensible bands", () => {
+        // Chipset runs hot — 65°C still cool, 90°C hot.
+        expect(tempBandFor(65, TEMP_PROFILES.chipset)).toBe("cool");
+        expect(tempBandFor(85, TEMP_PROFILES.chipset)).toBe("hot");
+        // Wi-Fi: 45°C cool, 70°C hot.
+        expect(tempBandFor(45, TEMP_PROFILES.wifi)).toBe("cool");
+        expect(tempBandFor(70, TEMP_PROFILES.wifi)).toBe("hot");
+        // Thunderbolt: 50°C cool, 75°C hot.
+        expect(tempBandFor(50, TEMP_PROFILES.thunderbolt)).toBe("cool");
+        expect(tempBandFor(75, TEMP_PROFILES.thunderbolt)).toBe("hot");
+    });
+
+    it("ram: idle RAM (~38°C) stays cool; throttle territory (~75°C) is hot+", () => {
+        const p = TEMP_PROFILES.ram;
+        expect(tempBandFor(38, p)).toBe("cool");
+        expect(tempBandFor(75, p)).toBe("hot");
+        expect(tempBandFor(85, p)).toBe("critical");
+    });
+
+    it("ssd: same thresholds as RAM (similar thermal envelope)", () => {
+        expect(TEMP_PROFILES.ssd).toEqual(TEMP_PROFILES.ram);
+    });
+
+    it("cpu profile matches the legacy tempBand exactly", () => {
+        // The legacy tempBand function must remain a CPU-profile alias so
+        // older call sites don't drift.
+        for (const c of [30, 60, 60.1, 80, 80.1, 95, 95.1, 110]) {
+            expect(tempBand(c)).toBe(tempBandFor(c, TEMP_PROFILES.cpu));
+        }
     });
 });

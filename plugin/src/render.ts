@@ -7,7 +7,7 @@
 //
 // Returned as a data: URI suitable for Stream Deck's setImage command.
 
-import { BG_COLOR, COLORS, NO_DATA_COLOR, TEXT_COLOR, type Band } from "./thresholds.js";
+import { BG_COLOR, COLORS, NO_DATA_COLOR, TEXT_COLOR, bandFor, type Band, type MetricProfile } from "./thresholds.js";
 
 export type RenderInput = {
     /** Short label shown in the header (e.g., "CPU", "GPU", "FAN1"). */
@@ -26,7 +26,12 @@ export type RenderInput = {
     /** Fixed Y-axis range for the graph. */
     range: { min: number; max: number };
     /** View mode. Defaults to "graph". */
-    viewMode?: "graph" | "value";
+    viewMode?: "graph" | "value" | "meter";
+    /** Raw numeric value (for meter view only — meter needs the unformatted
+     *  number to compute lit-segment count). */
+    rawValue?: number | null;
+    /** Profile (used by meter to derive per-segment colors). */
+    profile?: MetricProfile;
 };
 
 const W = 144;
@@ -132,6 +137,9 @@ export function renderSVG(input: RenderInput): string {
     if (input.viewMode === "value") {
         return renderValueOnly(input);
     }
+    if (input.viewMode === "meter") {
+        return renderMeter(input);
+    }
     return renderWithGraph(input);
 }
 
@@ -196,6 +204,84 @@ function renderValueOnly(input: RenderInput): string {
                 `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="26" font-weight="700" ` +
                 `fill="${headerColor}">${xmlEscape(headerText)}</text>` +
             value +
+        `</svg>`;
+    return svg;
+}
+
+/**
+ * "Meter" view: 80s boombox-style VU column. 12 stacked segments centred
+ * horizontally; each segment's color is fixed by its position in the
+ * column (bottom green → top red), so as the value rises more segments
+ * AND warmer colors light up. Segments below the current value are at
+ * full opacity; above are dim "unlit" outlines.
+ *
+ * Requires `rawValue` (numeric watts/whatever) and `profile` (thresholds)
+ * on the input. Used by power actions on key press; toggle-back returns
+ * to graph view.
+ */
+function renderMeter(input: RenderInput): string {
+    const SEGMENTS = 12;
+    const GAP = 2;                          // px between segments
+    const COL_TOP = 32;                     // y where column begins
+    const COL_BOTTOM = 124;                 // y where column ends — leaves
+                                            // room for value text below
+    const COL_X = 49;                       // left edge of column
+    const COL_W = 46;                       // column width
+    const COL_H = COL_BOTTOM - COL_TOP;     // 92 px
+    const SEG_H = (COL_H - (SEGMENTS - 1) * GAP) / SEGMENTS;  // ≈ 5.83 px each
+
+    const headerColor = input.noData ? NO_DATA_COLOR : TEXT_COLOR;
+    const headerText = input.noData ? "No data" : input.label;
+    const valueColor = input.noData ? NO_DATA_COLOR : COLORS[input.band];
+
+    // Compute how many segments are lit. profile required for color band
+    // per segment; if missing (defensive), default to all-green segments.
+    let numLit = 0;
+    if (!input.noData && input.rawValue != null && input.rawValue >= input.range.min) {
+        const norm = (input.rawValue - input.range.min) / (input.range.max - input.range.min);
+        numLit = Math.max(0, Math.min(SEGMENTS, Math.round(norm * SEGMENTS)));
+    }
+
+    // Per-segment color: classify each segment's TOP edge value with the
+    // band thresholds, so the color transitions happen at real boundaries.
+    const profile = input.profile;
+    const segments: string[] = [];
+    for (let i = 0; i < SEGMENTS; i++) {
+        // Segment 0 = bottom; segment SEGMENTS-1 = top.
+        const y = COL_BOTTOM - (i + 1) * SEG_H - i * GAP;
+        let color: string;
+        if (profile) {
+            const segValue = input.range.min
+                + ((i + 1) / SEGMENTS) * (input.range.max - input.range.min);
+            color = COLORS[bandFor(segValue, profile)];
+        } else {
+            // Fallback to per-position banding without profile thresholds.
+            const pos = i / SEGMENTS;
+            const band: Band = pos < 0.5 ? "cool" : pos < 0.75 ? "warm" : pos < 0.92 ? "hot" : "critical";
+            color = COLORS[band];
+        }
+        const isLit = i < numLit;
+        const opacity = isLit ? "1" : "0.18";
+        segments.push(
+            `<rect x="${COL_X}" y="${y.toFixed(2)}" width="${COL_W}" height="${SEG_H.toFixed(2)}" ` +
+            `rx="1.5" fill="${color}" fill-opacity="${opacity}"/>`
+        );
+    }
+
+    const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">` +
+            `<rect x="0" y="0" width="${W}" height="${H}" fill="${BG_COLOR}"/>` +
+            // Header centered at top
+            `<text x="${W / 2}" y="22" text-anchor="middle" ` +
+                `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="20" font-weight="700" ` +
+                `fill="${headerColor}">${xmlEscape(headerText)}</text>` +
+            segments.join("") +
+            // Value text below the column. y=140 leaves a couple px of
+            // breathing room before the 144 px canvas edge for descenders.
+            (input.noData ? "" :
+                `<text x="${W / 2}" y="140" text-anchor="middle" ` +
+                `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="14" font-weight="700" ` +
+                `fill="${valueColor}">${xmlEscape(input.valueText)}</text>`) +
         `</svg>`;
     return svg;
 }
