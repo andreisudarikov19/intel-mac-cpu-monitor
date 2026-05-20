@@ -8,7 +8,7 @@ import { GPUTempAction } from "./actions/gpu.js";
 import { FanSpeedAction } from "./actions/fan.js";
 import { hub, type GlobalSettings } from "./hub.js";
 
-streamDeck.logger.setLevel("info");
+streamDeck.logger.setLevel("trace");
 
 streamDeck.actions.registerAction(new CPUCoreTempAction());
 streamDeck.actions.registerAction(new CPUTempAction());

@@ -10,7 +10,8 @@ import type { JsonValue } from "@elgato/utils";
 import { hub } from "../hub.js";
 
 type Settings = {
-    fanIndex?: number;
+    /** sdpi-select returns its `value` as a string; pickFanIndex coerces. */
+    fanIndex?: number | string;
 };
 
 @action({ UUID: "dev.andreisudarikov.intel-mac-monitor.fan" })
@@ -60,8 +61,12 @@ export class FanSpeedAction extends SingletonAction<Settings> {
     }
 }
 
-function pickFanIndex(stored: number | undefined): number {
-    if (typeof stored === "number") return stored;
+function pickFanIndex(stored: number | string | undefined): number {
+    if (typeof stored === "number" && Number.isInteger(stored)) return stored;
+    if (typeof stored === "string" && stored.length > 0) {
+        const n = parseInt(stored, 10);
+        if (Number.isInteger(n)) return n;
+    }
     return hub.catalog?.fans[0]?.index ?? 0;
 }
 

@@ -20,8 +20,12 @@ enum Sensors {
         ["TC\(index)C", "TC\(index)c"]
     }
 
-    /// Indices to probe for per-core CPU temperature. Covers 0..8.
-    static let cpuCoreIndices: [Int] = Array(0...8)
+    /// Indices to probe for per-core CPU temperature. Covers 0..15 to handle
+    /// Intel Macs with up to 16 cores (the iMac Pro tops out at 18 but uses
+    /// different sensor naming; for mainstream Intel Macs, 16 is more than
+    /// enough headroom). Sensors that don't exist on the host are silently
+    /// dropped at probe time.
+    static let cpuCoreIndices: [Int] = Array(0...15)
 
     /// Package/die-level CPU temperature candidates in preference order:
     /// package → filtered die → diode → diode virtual → heatsink → PECI →

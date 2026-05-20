@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 144" width="144" height="144">
-  <rect x="0" y="0" width="144" height="144" fill="#0b0b0c"/>
-  <text x="72" y="60" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="22" font-weight="700" fill="#e5e7eb">CORE</text>
-  <text x="72" y="92" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="20" font-weight="600" fill="#22c55e">TEMP</text>
-  <text x="72" y="124" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="11" font-weight="500" fill="#6b7280">starting…</text>
+  <rect x="0" y="0" width="144" height="144" fill="#1c1c1e"/>
+  <text x="72" y="60" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="22" font-weight="700" fill="#ebebf5">CORE</text>
+  <text x="72" y="92" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="20" font-weight="600" fill="#30d158">TEMP</text>
+  <text x="72" y="124" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="11" font-weight="500" fill="#8e8e93">starting…</text>
 </svg>

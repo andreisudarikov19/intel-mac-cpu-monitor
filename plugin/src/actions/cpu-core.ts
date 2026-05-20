@@ -10,8 +10,10 @@ import type { JsonValue } from "@elgato/utils";
 import { hub } from "../hub.js";
 
 type Settings = {
-    /** Selected core index from the Property Inspector. */
-    coreIndex?: number;
+    /** Selected core index from the Property Inspector.
+     *  Comes back as a string from sdpi-select (the `value` attribute is
+     *  always a string); pickCoreIndex coerces. */
+    coreIndex?: number | string;
     /** Last user-chosen temperature unit; mirrored into global settings. */
     tempUnit?: "C" | "F";
 };
@@ -61,8 +63,12 @@ export class CPUCoreTempAction extends SingletonAction<Settings> {
     }
 }
 
-function pickCoreIndex(stored: number | undefined): number {
-    if (typeof stored === "number") return stored;
+function pickCoreIndex(stored: number | string | undefined): number {
+    if (typeof stored === "number" && Number.isInteger(stored)) return stored;
+    if (typeof stored === "string" && stored.length > 0) {
+        const n = parseInt(stored, 10);
+        if (Number.isInteger(n)) return n;
+    }
     return hub.catalog?.cpuCores[0]?.index ?? 0;
 }
 

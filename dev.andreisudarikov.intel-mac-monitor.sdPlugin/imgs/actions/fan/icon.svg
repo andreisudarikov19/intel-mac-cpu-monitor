@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40">
-  <rect x="0" y="0" width="40" height="40" rx="6" fill="#0b0b0c"/>
-  <text x="20" y="20" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="13" font-weight="700" fill="#e5e7eb">FAN</text>
-  <text x="20" y="32" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="9" font-weight="600" fill="#22c55e">RPM</text>
+  <rect x="0" y="0" width="40" height="40" rx="6" fill="#1c1c1e"/>
+  <text x="20" y="20" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="13" font-weight="700" fill="#ebebf5">FAN</text>
+  <text x="20" y="32" text-anchor="middle" font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="9" font-weight="600" fill="#30d158">RPM</text>
 </svg>

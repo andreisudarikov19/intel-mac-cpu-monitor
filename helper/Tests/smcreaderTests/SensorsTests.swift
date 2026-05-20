@@ -9,8 +9,11 @@ struct SensorsTests {
         #expect(Sensors.cpuCoreCandidates(index: 7) == ["TC7C", "TC7c"])
     }
 
-    @Test func cpuCoreIndices_Covers0Through8() {
-        #expect(Sensors.cpuCoreIndices == [0, 1, 2, 3, 4, 5, 6, 7, 8])
+    @Test func cpuCoreIndices_Covers0Through15() {
+        // Wide enough to cover any current Intel iMac/MacBook (e.g. the
+        // 10-core iMac uses cores 0–9). Non-existent sensors are dropped at
+        // probe time.
+        #expect(Sensors.cpuCoreIndices == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])
     }
 
     @Test func fanKeysFormat() {

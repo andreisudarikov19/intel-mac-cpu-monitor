@@ -3,21 +3,27 @@
 
 export type Band = "cool" | "warm" | "hot" | "critical";
 
+// Palette is macOS dark-mode system colors — what AppKit/UIKit's "system"
+// dynamic colors resolve to in dark appearance. This makes the key images
+// look at-home next to native macOS UI elements.
+
 export const COLORS: Record<Band, string> = {
-    cool: "#22c55e",        // green-500
-    warm: "#eab308",        // yellow-500
-    hot: "#f97316",         // orange-500
-    critical: "#ef4444",    // red-500
+    cool: "#30d158",        // System Green (dark)
+    warm: "#ffd60a",        // System Yellow (dark)
+    hot: "#ff9f0a",         // System Orange (dark)
+    critical: "#ff453a",    // System Red (dark)
 };
 
-/** Color for the special "no data" header state (orange-amber). */
-export const NO_DATA_COLOR = "#f59e0b";
+/** "No data" header color — reuses System Orange so it reads as an alert
+ *  without being scary like System Red. */
+export const NO_DATA_COLOR = "#ff9f0a";
 
-/** Light neutral for text on a dark background. */
-export const TEXT_COLOR = "#e5e7eb";       // gray-200
+/** Primary label color in macOS dark mode (NSColor.labelColor / .light). */
+export const TEXT_COLOR = "#ebebf5";
 
-/** Dark background for the key. */
-export const BG_COLOR = "#0b0b0c";
+/** macOS secondarySystemBackground in dark mode. Slightly lifted off pure
+ *  black so the key looks intentional next to other dark UI surfaces. */
+export const BG_COLOR = "#1c1c1e";
 
 /** Y-axis fixed range for temperature actions, in °C. */
 export const TEMP_RANGE = { min: 30, max: 100 } as const;

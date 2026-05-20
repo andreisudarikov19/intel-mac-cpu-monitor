@@ -29,7 +29,10 @@ export type RenderInput = {
 
 const W = 144;
 const H = 144;
-const HEADER_Y = 28;
+// Header baseline. Was 20 (font-size 16). Raised to 28 to fit a 22 px
+// header without clipping at the top edge of the key.
+const HEADER_BASELINE_Y = 28;
+const HEADER_Y = 36;          // bottom of the header zone (for spacing math)
 const VALUE_Y = 72;
 const GRAPH_Y = 72;
 const GRAPH_H = H - GRAPH_Y;
@@ -115,15 +118,17 @@ export function renderSVG(input: RenderInput): string {
 
     const sparkline = buildSparkline(input.samples, input.range, graphColor);
 
-    // Font sizes chosen by trial: header ~18px, value ~36px legible at 144px.
+    // Header 22 px / weight 700 — chosen for legibility at typical
+    // Stream Deck key viewing distances (~40 cm to a 19 mm key).
+    // Value 34 px / weight 700 — unchanged.
     const svg =
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">` +
             `<rect x="0" y="0" width="${W}" height="${H}" fill="${BG_COLOR}"/>` +
-            `<text x="${W / 2}" y="${HEADER_Y - 8}" text-anchor="middle" ` +
-                `font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="16" font-weight="600" ` +
+            `<text x="${W / 2}" y="${HEADER_BASELINE_Y}" text-anchor="middle" ` +
+                `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="22" font-weight="700" ` +
                 `fill="${headerColor}">${xmlEscape(headerText)}</text>` +
             `<text x="${W / 2}" y="${VALUE_Y - 12}" text-anchor="middle" ` +
-                `font-family="-apple-system,Helvetica,Arial,sans-serif" font-size="34" font-weight="700" ` +
+                `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="34" font-weight="700" ` +
                 `fill="${valueColor}">${xmlEscape(input.valueText)}</text>` +
             sparkline +
         `</svg>`;

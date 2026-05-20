@@ -7,7 +7,7 @@
   "SDKVersion": 3,
   "Icon": "imgs/plugin/icon",
   "CategoryIcon": "imgs/plugin/category-icon",
-  "Category": "Hardware Monitor",
+  "Category": "Intel Mac Hardware Monitor",
   "CodePath": "bin/plugin.js",
   "OS": [
     { "Platform": "mac", "MinimumVersion": "13" }
