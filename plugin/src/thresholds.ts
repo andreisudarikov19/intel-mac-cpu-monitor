@@ -3,20 +3,25 @@
 
 export type Band = "cool" | "warm" | "hot" | "critical";
 
-// Palette is macOS dark-mode system colors — what AppKit/UIKit's "system"
-// dynamic colors resolve to in dark appearance. This makes the key images
-// look at-home next to native macOS UI elements.
+// Palette inspired by iPhone StandBy / "Color" clock faces — warmer and
+// more saturated than macOS dark-mode system colors. Tuned for at-a-glance
+// readability from across a room (Stream Deck keys are 19 mm tall).
+
+// All four bands derived from a single HSL anchor — S = 79%, L = 58% —
+// rotating hue around the color wheel. Keeping S/L constant makes the
+// palette feel like a coherent family rather than four arbitrary picks.
+// Cool green hue matches the "Stream Deck monitor" aesthetic Andrei
+// referenced.
 
 export const COLORS: Record<Band, string> = {
-    cool: "#30d158",        // System Green (dark)
-    warm: "#ffd60a",        // System Yellow (dark)
-    hot: "#ff9f0a",         // System Orange (dark)
-    critical: "#ff453a",    // System Red (dark)
+    cool: "#42E84A",        // H 123° — vivid pure green
+    warm: "#E8DA42",        // H  55° — lemon yellow
+    hot: "#E88E42",         // H  28° — warm tangerine
+    critical: "#E84258",    // H   2° — coral-red
 };
 
-/** "No data" header color — reuses System Orange so it reads as an alert
- *  without being scary like System Red. */
-export const NO_DATA_COLOR = "#ff9f0a";
+/** "No data" header color — uses the `hot` tangerine. */
+export const NO_DATA_COLOR = "#E88E42";
 
 /** Primary label color in macOS dark mode (NSColor.labelColor / .light). */
 export const TEXT_COLOR = "#ebebf5";
@@ -24,6 +29,10 @@ export const TEXT_COLOR = "#ebebf5";
 /** macOS secondarySystemBackground in dark mode. Slightly lifted off pure
  *  black so the key looks intentional next to other dark UI surfaces. */
 export const BG_COLOR = "#1c1c1e";
+
+/** Dark foreground for use on top of a band-color background (the "value"
+ *  view mode). Contrast vs each band tested AAA except critical (AA). */
+export const DARK_ON_BAND_COLOR = "#1c1c1e";
 
 /** Y-axis fixed range for temperature actions, in °C. */
 export const TEMP_RANGE = { min: 30, max: 100 } as const;

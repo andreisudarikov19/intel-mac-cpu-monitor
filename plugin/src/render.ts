@@ -25,17 +25,30 @@ export type RenderInput = {
     samples: (number | null)[];
     /** Fixed Y-axis range for the graph. */
     range: { min: number; max: number };
+    /** View mode. Defaults to "graph". */
+    viewMode?: "graph" | "value";
 };
 
 const W = 144;
 const H = 144;
-// Header baseline. Was 20 (font-size 16). Raised to 28 to fit a 22 px
-// header without clipping at the top edge of the key.
-const HEADER_BASELINE_Y = 28;
-const HEADER_Y = 36;          // bottom of the header zone (for spacing math)
-const VALUE_Y = 72;
-const GRAPH_Y = 72;
+// Layout zones (graph mode). Baselines shifted down 2–4 px from initial
+// v1.1 layout to give the header a visible top margin (caps now start at
+// y=7 instead of y=3).
+//
+//   y=  0..26   header zone   (baseline 26 — 7 px above caps to top edge)
+//   y= 26..62   value zone    (baseline 56)
+//   y= 62..144  graph zone    (82 px tall — still 14% taller than original)
+const HEADER_BASELINE_Y = 26;
+const VALUE_BASELINE_Y = 56;
+const GRAPH_Y = 62;
 const GRAPH_H = H - GRAPH_Y;
+
+// Number of trailing samples to render in the sparkline. The hub keeps a
+// 45-sample buffer (45 s of history) but the graph displays only the most
+// recent 30. With the 144 px canvas, that yields ~5 px/sample — each tick
+// is a clearly distinct mark instead of a hairline. The leftover 15
+// samples stay in the buffer for any future "zoomed-out view" feature.
+const VISIBLE_SAMPLES = 30;
 
 /** Escape characters that have special meaning in XML attribute values. */
 function xmlEscape(s: string): string {
@@ -46,13 +59,18 @@ function xmlEscape(s: string): string {
         .replace(/"/g, "&quot;");
 }
 
-/** Build the sparkline as one `<path>` per contiguous run of non-null samples. */
+/** Build the sparkline as one `<path>` per contiguous run of non-null samples.
+ *  Renders only the most recent VISIBLE_SAMPLES (49) of whatever was passed
+ *  in — the buffer may hold more (e.g. 60 s of history). */
 function buildSparkline(
     samples: (number | null)[],
     range: { min: number; max: number },
     color: string,
 ): string {
-    const n = samples.length;
+    const visible = samples.length > VISIBLE_SAMPLES
+        ? samples.slice(-VISIBLE_SAMPLES)
+        : samples;
+    const n = visible.length;
     if (n === 0) return "";
 
     const xStep = n > 1 ? W / (n - 1) : W;
@@ -66,7 +84,7 @@ function buildSparkline(
     const runs: { startIdx: number; pts: { x: number; y: number }[] }[] = [];
     let cur: typeof runs[number] | null = null;
     for (let i = 0; i < n; i++) {
-        const s = samples[i];
+        const s = visible[i];
         if (s === null || s === undefined) {
             cur = null;
             continue;
@@ -104,13 +122,21 @@ function buildSparkline(
             strokeD += ` L${run.pts[i]!.x.toFixed(2)},${run.pts[i]!.y.toFixed(2)}`;
         }
         parts.push(
-            `<path d="${strokeD}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`
+            `<path d="${strokeD}" fill="none" stroke="${color}" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>`
         );
     }
     return parts.join("");
 }
 
 export function renderSVG(input: RenderInput): string {
+    if (input.viewMode === "value") {
+        return renderValueOnly(input);
+    }
+    return renderWithGraph(input);
+}
+
+/** Default view: header + value + sparkline on neutral dark bg. */
+function renderWithGraph(input: RenderInput): string {
     const headerColor = input.noData ? NO_DATA_COLOR : TEXT_COLOR;
     const headerText = input.noData ? "No data" : input.label;
     const valueColor = input.noData ? NO_DATA_COLOR : COLORS[input.band];
@@ -118,19 +144,58 @@ export function renderSVG(input: RenderInput): string {
 
     const sparkline = buildSparkline(input.samples, input.range, graphColor);
 
-    // Header 22 px / weight 700 — chosen for legibility at typical
-    // Stream Deck key viewing distances (~40 cm to a 19 mm key).
-    // Value 34 px / weight 700 — unchanged.
+    // Header 26 px / weight 700 — matches value-mode header size for
+    // visual consistency. Value 34 px / weight 700 — unchanged.
     const svg =
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">` +
             `<rect x="0" y="0" width="${W}" height="${H}" fill="${BG_COLOR}"/>` +
             `<text x="${W / 2}" y="${HEADER_BASELINE_Y}" text-anchor="middle" ` +
-                `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="22" font-weight="700" ` +
+                `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="26" font-weight="700" ` +
                 `fill="${headerColor}">${xmlEscape(headerText)}</text>` +
-            `<text x="${W / 2}" y="${VALUE_Y - 12}" text-anchor="middle" ` +
+            `<text x="${W / 2}" y="${VALUE_BASELINE_Y}" text-anchor="middle" ` +
                 `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="34" font-weight="700" ` +
                 `fill="${valueColor}">${xmlEscape(input.valueText)}</text>` +
             sparkline +
+        `</svg>`;
+    return svg;
+}
+
+/**
+ * "Value" view: dark background, with a sharp-cornered band-colored frame
+ * around the entire key. Header (white) and value (band color) live inside
+ * the frame. Toggled on by a key press.
+ *
+ * noData mode: keep the frame (it's the key's "alive in value mode"
+ * indicator) but tinted orange; drop the value text.
+ */
+function renderValueOnly(input: RenderInput): string {
+    const accent = input.noData ? NO_DATA_COLOR : COLORS[input.band];
+    const headerColor = input.noData ? NO_DATA_COLOR : TEXT_COLOR;
+    const headerText = input.noData ? "No data" : input.label;
+
+    // Layout (144x144):
+    //   frame  x=9, y=9, 126x126, rx=14, stroke 7.5
+    //          → frame's corner curve is concentric with Stream Deck's key
+    //            bezel (measured visually at ~23 px radius). Both curves
+    //            share center (23, 23) so the frame parallels the bezel
+    //            arc, sitting 5.25 px inside it everywhere.
+    //   header baseline y=58, font-size 26  (caps ~y=36..58)
+    //   value  baseline y=104, font-size 32 (caps ~y=76..104)
+    const value = input.noData
+        ? ""
+        : `<text x="${W / 2}" y="104" text-anchor="middle" ` +
+              `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="32" font-weight="700" ` +
+              `fill="${accent}">${xmlEscape(input.valueText)}</text>`;
+
+    const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">` +
+            `<rect x="0" y="0" width="${W}" height="${H}" fill="${BG_COLOR}"/>` +
+            `<rect x="9" y="9" width="126" height="126" rx="14" ` +
+                `fill="none" stroke="${accent}" stroke-width="7.5"/>` +
+            `<text x="${W / 2}" y="58" text-anchor="middle" ` +
+                `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="26" font-weight="700" ` +
+                `fill="${headerColor}">${xmlEscape(headerText)}</text>` +
+            value +
         `</svg>`;
     return svg;
 }

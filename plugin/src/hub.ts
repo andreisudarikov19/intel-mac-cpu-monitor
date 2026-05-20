@@ -11,8 +11,6 @@ import {
     type SupervisorCallbacks,
 } from "./helper-supervisor.js";
 import type {
-    CPUCoreInfo,
-    FanInfo,
     ReadingEvent,
     ReadyEvent,
 } from "./helper-protocol.js";
@@ -26,7 +24,15 @@ import {
     type Band,
 } from "./thresholds.js";
 
-const HISTORY_SIZE = 60;
+// 45-sample ring buffer (= 45 s at 1 Hz). The graph only renders the most
+// recent 30 (see render.ts VISIBLE_SAMPLES); the extra 15 sit in reserve
+// for any future zoom-out / longer-window feature.
+const HISTORY_SIZE = 45;
+
+/** Visual mode for a single key.
+ *  - "graph": default — header + value + sparkline (current behavior)
+ *  - "value": header + value on a band-colored solid background, no graph */
+export type ViewMode = "graph" | "value";
 
 export type GlobalSettings = {
     /** "C" or "F". Default "C". */
@@ -51,6 +57,7 @@ type Subscription = {
     subscriber: Subscriber;
     kind: SubscriptionKind;
     history: History;
+    viewMode: ViewMode;
 };
 
 export class Hub {
@@ -112,12 +119,13 @@ export class Hub {
      *  for the same contextId. If the new subscription has the same kind as
      *  the existing one, history is preserved (no flicker on settings save).
      */
-    subscribe(subscriber: Subscriber, kind: SubscriptionKind): void {
+    subscribe(subscriber: Subscriber, kind: SubscriptionKind, viewMode: ViewMode = "graph"): void {
         const existing = this.subscriptions.get(subscriber.contextId);
         if (existing && subscriptionKindsEqual(existing.kind, kind)) {
-            // Same metric/sensor — refresh the subscriber reference (it may
-            // have a new closure capture) but keep history.
+            // Same metric/sensor — refresh the subscriber reference and
+            // view mode, keep history.
             existing.subscriber = subscriber;
+            existing.viewMode = viewMode;
             this.renderAndPush(existing).catch((e) => streamDeck.logger.error(String(e)));
             return;
         }
@@ -125,9 +133,20 @@ export class Hub {
             subscriber,
             kind,
             history: new History(HISTORY_SIZE),
+            viewMode,
         };
         this.subscriptions.set(subscriber.contextId, sub);
         // Render current state immediately (likely "No data" until first reading).
+        this.renderAndPush(sub).catch((e) => streamDeck.logger.error(String(e)));
+    }
+
+    /** Update only the view mode of an existing subscription, preserving
+     *  history. Used by the onKeyDown toggle. No-op if context isn't
+     *  subscribed (e.g. key was just removed). */
+    setViewMode(contextId: string, mode: ViewMode): void {
+        const sub = this.subscriptions.get(contextId);
+        if (!sub) return;
+        sub.viewMode = mode;
         this.renderAndPush(sub).catch((e) => streamDeck.logger.error(String(e)));
     }
 
@@ -276,6 +295,7 @@ export class Hub {
             noData,
             samples: sub.history.toArray(),
             range: TEMP_RANGE,
+            viewMode: sub.viewMode,
         };
     }
 
@@ -300,6 +320,7 @@ export class Hub {
             noData,
             samples: sub.history.toArray(),
             range: { min: 0, max },
+            viewMode: sub.viewMode,
         };
     }
 }
