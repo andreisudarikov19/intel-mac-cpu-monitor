@@ -74,11 +74,23 @@ struct SensorsTests {
         #expect(Sensors.thunderboltKeysInPreferenceOrder.contains("TTRD"))
     }
 
-    @Test func cpuPowerPreference_PackageFirst() {
-        // PCPC = CPU Package power. Most accurate for "CPU draw" on
-        // Intel Macs. Other variants follow as fallbacks.
-        #expect(Sensors.cpuPowerKeysInPreferenceOrder.first == "PCPC")
+    @Test func cpuPowerPreference_PCPRFirst() {
+        // PCPR = "CPU Package total (SMC)" — the RAPL-equivalent total
+        // power draw. Verified on hardware in v1.2.1 to give realistic
+        // readings (~50 W moderate load on a 10-core iMac, vs PCPT's
+        // bogus 4 W under the old preference order).
+        #expect(Sensors.cpuPowerKeysInPreferenceOrder.first == "PCPR")
+        #expect(Sensors.cpuPowerKeysInPreferenceOrder.contains("PCTR"))
         #expect(Sensors.cpuPowerKeysInPreferenceOrder.contains("PCPT"))
+    }
+
+    @Test func allKnownPowerKeys_includeBothCPUandGPU() {
+        // Diagnostic-only key list used by the power-probe stderr dump.
+        // Must include every key in the preference orders plus a few
+        // extras for completeness.
+        let known = Sensors.allKnownPowerKeysForDiagnostics
+        for k in Sensors.cpuPowerKeysInPreferenceOrder { #expect(known.contains(k)) }
+        for k in Sensors.gpuPowerKeysInPreferenceOrder { #expect(known.contains(k)) }
     }
 
     @Test func gpuPowerPreference_DiscreteFirst() {

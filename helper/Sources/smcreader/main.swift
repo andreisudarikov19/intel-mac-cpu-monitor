@@ -44,6 +44,33 @@ do {
 // 3. Probe catalogue
 let t2 = Device.isT2
 let catalog = CatalogProbe.probe(reader: smc, t2: t2)
+
+// 3a. Power-probe diagnostic dump. Walks every known power SMC key and
+// reports key + dataType + decoded value on stderr. Stream Deck captures
+// stderr into the plugin log (at ERROR level — noise but useful for
+// "why does CPU power look wrong" troubleshooting). Triggered once per
+// helper start; cheap (one SMC read per known power key).
+func logDiag(_ msg: String) {
+    if let data = (msg + "\n").data(using: .utf8) {
+        FileHandle.standardError.write(data)
+    }
+}
+logDiag("=== power-probe ===")
+for key in Sensors.allKnownPowerKeysForDiagnostics {
+    if let r = smc.read(key: key) {
+        let decoded = Decoders.decodePower(
+            b0: r.bytes.0, b1: r.bytes.1, b2: r.bytes.2, b3: r.bytes.3,
+            dataType: r.dataType
+        )
+        let valueStr = decoded.map { String(format: "%.3f W", $0) } ?? "nil"
+        let bytes = String(format: "%02X %02X %02X %02X",
+            r.bytes.0, r.bytes.1, r.bytes.2, r.bytes.3)
+        logDiag("  \(key)  dataType=\"\(r.dataType)\"  bytes=\(bytes)  decoded=\(valueStr)")
+    } else {
+        logDiag("  \(key)  (absent)")
+    }
+}
+logDiag("=== end power-probe ===")
 emit(ReadyEvent(
     arch: "x86_64",
     t2: catalog.t2,

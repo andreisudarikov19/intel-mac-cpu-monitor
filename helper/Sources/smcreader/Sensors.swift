@@ -90,18 +90,41 @@ enum Sensors {
     ]
 
     /// CPU power (watts) keys, in preference order.
-    /// Source: exelban/stats — PCPC is "CPU Package", PCPT is "CPU Package
-    /// total", PCTR is "CPU Total". PC0C is per-core power; PCAM is the
-    /// IMON (current monitor) reading.
+    /// Source: exelban/stats. Naming on Intel Macs is inconsistent:
+    /// - PCPR = "CPU Package total (SMC)" — the RAPL-equivalent total
+    /// - PCTR = "CPU Total"
+    /// - PCPT = "CPU Package total" (may be partial on some models)
+    /// - PCPC = "CPU Package"
+    /// - PCAM = "CPU Core (IMON)" — integrated current monitor
+    /// - PC0R = "CPU Computing high side"
+    /// - PCEC = "CPU VccEDRAM"
+    /// - PC0G = "CPU GFX"
+    /// - PC0C = "CPU Core"
+    ///
+    /// Order chosen to prefer RAPL-style total readings over partials.
+    /// If the wrong key was picked on your Mac (catalog reports low
+    /// values), check the `power-probe` diagnostic dump emitted at
+    /// startup.
     static let cpuPowerKeysInPreferenceOrder: [String] = [
-        "PCPC", "PCPT", "PCTR", "PC0C", "PCAM",
+        "PCPR", "PCTR", "PCPT", "PCPC", "PCAM", "PC0R", "PC0C",
     ]
 
     /// GPU power (watts) keys, in preference order.
-    /// Source: exelban/stats — PG0C is the discrete GPU; PCGC and PCPG
-    /// are the integrated Intel GPU (different naming across generations).
     static let gpuPowerKeysInPreferenceOrder: [String] = [
-        "PG0C", "PCGC", "PCPG", "PG0R", "PCGM",
+        "PG0C", "PCGC", "PCPG", "PG0R", "PG1R", "PCGM",
+    ]
+
+    /// Every power SMC key we know about — used by the diagnostic dump
+    /// so we can see what the current Mac actually exposes (independent
+    /// of which one the catalog picks). NOT used by per-tick reads.
+    static let allKnownPowerKeysForDiagnostics: [String] = [
+        // CPU
+        "PCPR", "PCTR", "PCPT", "PCPC", "PCAM", "PC0R", "PC0C",
+        "PC0G", "PCEC", "PC1C", "PC2C", "PC3C",
+        // GPU
+        "PG0C", "PCGC", "PCPG", "PG0R", "PG1R", "PCGM",
+        // System totals (useful for sanity check)
+        "PSTR", "PDTR", "PZ0F",
     ]
 
     /// Number-of-fans key. Source: SMC+Fans.swift in Fanny/SMC.

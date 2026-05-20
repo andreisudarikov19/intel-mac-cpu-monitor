@@ -39,6 +39,24 @@ enum Decoders {
         return Double(signed) / 256.0
     }
 
+    /// Generic decoder for the SMC "SP" fixed-point family. The dataType
+    /// name is "spXY" where X is integer bits and Y is fractional bits
+    /// (both hex). Bits encode a signed 16-bit value, divided by 2^Y.
+    /// Examples: sp78 (7.8), sp87 (8.7), spa5 (10.5).
+    /// Source: pattern documented in exelban/stats SMC/smc.swift switch.
+    static func decodeSPFixedPoint(b0: UInt8, b1: UInt8, dataType: String) -> Double? {
+        guard dataType.count == 4, dataType.hasPrefix("sp") else { return nil }
+        let chars = Array(dataType)
+        guard let intBits = Int(String(chars[2]), radix: 16),
+              let fracBits = Int(String(chars[3]), radix: 16),
+              intBits >= 0, fracBits >= 0, intBits + fracBits == 15 else {
+            // Format doesn't fit 15-bit total (16 minus sign); bail.
+            return nil
+        }
+        let signed = Int16(bitPattern: (UInt16(b0) << 8) | UInt16(b1))
+        return Double(signed) / Double(1 << fracBits)
+    }
+
     /// Legacy single-byte Celsius decode (Fanny). The 0x7F mask drops the
     /// high bit which some SMC firmwares set as a status flag.
     static func decodeUI8(b0: UInt8) -> Double {
@@ -72,9 +90,12 @@ enum Decoders {
 
     // MARK: - Power decoders
 
-    /// Decode a power reading (watts) by dataType. Most modern Intel-Mac
-    /// power keys use FLT (4-byte IEEE float). Returns nil for non-finite
-    /// results.
+    /// Decode a power reading (watts) by dataType. Power keys on Intel
+    /// Macs use a mix of formats — FLT (4-byte float) is most common,
+    /// but some use SP-family fixed-point (e.g., PCPT may report as
+    /// "spa5"). For UNKNOWN dataTypes we return nil rather than guess —
+    /// for power, the byte-0 fallback that works for temps has no
+    /// physical meaning, so a wrong number is worse than no number.
     static func decodePower(b0: UInt8, b1: UInt8, b2: UInt8, b3: UInt8, dataType: String) -> Double? {
         let raw: Double
         switch dataType {
@@ -82,14 +103,16 @@ enum Decoders {
             let f = decodeFltAsFloat(b0: b0, b1: b1, b2: b2, b3: b3)
             if f.isNaN || f.isInfinite { return nil }
             raw = Double(f)
-        case "sp78":
-            raw = decodeSP78(b0: b0, b1: b1)
+        case let t where t.hasPrefix("sp"):
+            // Generic SP-family fixed-point. Covers sp78, sp87, spa5,
+            // etc. — any signed 16-bit fixed-point where the dataType
+            // encodes the fractional-bit count.
+            guard let v = decodeSPFixedPoint(b0: b0, b1: b1, dataType: t) else { return nil }
+            raw = v
         case let t where t.hasPrefix("ui8"):
             raw = decodeUI8(b0: b0)
         default:
-            // Last-resort fallback — calibration may be off but better
-            // than dropping the reading entirely.
-            raw = decodeUI8(b0: b0)
+            return nil
         }
         if raw.isNaN || raw.isInfinite { return nil }
         return raw

@@ -129,6 +129,36 @@ struct DecodersTests {
         #expect(abs(v! - 5.5) < 0.001)
     }
 
+    @Test func decodePower_SPA5_FractionalValue() {
+        // spa5 = signed 10.5 fixed-point. Bytes 0x04 0x1C = 0x041C = 1052
+        // (big-endian). 1052 / 32 = 32.875 W. Real example captured from
+        // PCPT on the v1.2.1 test hardware.
+        let v = Decoders.decodePower(b0: 0x04, b1: 0x1C, b2: 0, b3: 0, dataType: "spa5")
+        #expect(v != nil)
+        #expect(abs(v! - 32.875) < 0.001)
+    }
+
+    @Test func decodePower_UnknownDataType_ReturnsNil() {
+        // Regression guard for v1.2.1: previously the default branch fell
+        // back to UI8 (byte0 as integer watts), which produced bogus
+        // readings for keys with proprietary dataTypes. v1.2.1+ returns
+        // nil so the catalog probe rejects the key cleanly.
+        let v = Decoders.decodePower(b0: 0x32, b1: 0x00, b2: 0, b3: 0, dataType: "????")
+        #expect(v == nil)
+    }
+
+    @Test func decodeSPFixedPoint_DataTypeNotSPPrefix_ReturnsNil() {
+        let v = Decoders.decodeSPFixedPoint(b0: 0, b1: 0, dataType: "flt ")
+        #expect(v == nil)
+    }
+
+    @Test func decodeSPFixedPoint_BitCountMustSumTo15() {
+        // sp99 would be 9+9 = 18 bits → invalid (more than the 15 bits
+        // available after the sign bit). Must return nil.
+        let v = Decoders.decodeSPFixedPoint(b0: 0, b1: 0, dataType: "sp99")
+        #expect(v == nil)
+    }
+
     // MARK: - SP78 edge cases (review LOW #9)
 
     @Test func decodeSP78_MinimumNegative() {
