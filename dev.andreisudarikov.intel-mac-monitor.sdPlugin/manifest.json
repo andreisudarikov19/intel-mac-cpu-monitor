@@ -1,8 +1,8 @@
 {
   "Name": "Intel Mac Hardware Monitor",
   "Author": "Andrei Sudarikov",
-  "Description": "Live CPU temperature, GPU temperature, and fan speed graphs on your Stream Deck. Intel Macs only (T2 and pre-T2 supported).",
-  "Version": "0.1.0.0",
+  "Description": "Live thermal, fan, and power readouts on your Stream Deck for Intel Macs (T2 and pre-T2). Tap a key to switch the graph view to a slide; long-press to switch to a VU-meter view.",
+  "Version": "1.2.2.0",
   "UUID": "dev.andreisudarikov.intel-mac-monitor",
   "SDKVersion": 3,
   "Icon": "imgs/plugin/icon",

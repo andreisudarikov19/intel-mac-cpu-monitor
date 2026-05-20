@@ -4,6 +4,46 @@ All notable changes to the Intel Mac Hardware Monitor plugin. Each entry
 describes the **resulting state** of that version — features as shipped,
 not the development journey. Append new versions to the top.
 
+**Release checklist** when closing out a version:
+1. Bump `Version` in `dev.andreisudarikov.intel-mac-monitor.sdPlugin/manifest.json`
+   to match. Stream Deck manifests use 4-component `{major}.{minor}.{patch}.{build}`
+   — so v1.3 → `1.3.0.0`, v1.3.1 → `1.3.1.0`. This is what users see in
+   the Stream Deck UI's plugin info panel.
+2. Append the new version's release notes to the top of this file.
+3. Run `npm run build && streamdeck restart dev.andreisudarikov.intel-mac-monitor`
+   so the UI picks up the new version string.
+
+---
+
+## v1.2.2 (2026-05-20)
+
+Release-hygiene fix. The manifest's `Version` field had been stuck at
+the v0.1 placeholder since day one, so the Stream Deck UI's plugin-info
+panel was lying about which version users had installed. This release
+makes the manifest version the source of truth and codifies bumping it
+as part of every future close-out.
+
+### Fixed
+- **`manifest.json` Version**: `0.1.0.0` → `1.2.2.0`. From here on, the
+  manifest version tracks the shipping version 1:1
+  (`{major}.{minor}.{patch}.0` — the fourth component is reserved for
+  rebuild numbers within a patch).
+
+### Changed
+- **Plugin description** (visible in Stream Deck UI) rewritten from
+  the v1.0-era "Live CPU temperature, GPU temperature, and fan speed
+  graphs…" to one that reflects the v1.2 feature set (thermals + fans
+  + power; tap for slide, long-press for VU meter).
+
+### Added
+- **Release checklist** at the top of `CHANGELOG.md` — three steps to
+  follow on every version close-out (bump manifest, append release
+  notes, rebuild + restart). Catches the v0.1 drift class of bug.
+
+### Notes
+- No code changes; manifest + docs only. Tests unchanged at **86 Swift
+  + 81 TypeScript = 167**.
+
 ---
 
 ## v1.2.1 (2026-05-20)
@@ -402,7 +442,7 @@ Power profiles (W) — tuned against actual Intel Mac TDPs (laptops
 
 ---
 
-## Cumulative current state (post-v1.2.1)
+## Cumulative current state (post-v1.2.2)
 
 | | Count |
 |---|---|
