@@ -6,10 +6,11 @@ import streamDeck, {
     type DidReceiveSettingsEvent,
     type SendToPluginEvent,
     type KeyDownEvent,
+    type KeyUpEvent,
 } from "@elgato/streamdeck";
 import type { JsonValue } from "@elgato/utils";
 import { hub, type ViewMode } from "../hub.js";
-import { toggleView } from "./toggle-view.js";
+import { handleKeyDown, handleKeyUp } from "./toggle-view.js";
 
 type Settings = {
     /** Selected core index from the Property Inspector.
@@ -53,8 +54,12 @@ export class CPUCoreTempAction extends SingletonAction<Settings> {
         applyUnitFromSettings(ev.payload.settings);
     }
 
-    override onKeyDown(ev: KeyDownEvent<Settings>): Promise<void> {
-        return toggleView(ev);
+    override onKeyDown(ev: KeyDownEvent<Settings>): void {
+        handleKeyDown(ev);
+    }
+
+    override onKeyUp(ev: KeyUpEvent<Settings>): void {
+        handleKeyUp(ev);
     }
 
     override onSendToPlugin(ev: SendToPluginEvent<JsonValue, Settings>): Promise<void> | void {

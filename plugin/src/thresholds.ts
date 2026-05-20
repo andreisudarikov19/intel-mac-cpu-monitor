@@ -80,15 +80,15 @@ export const TEMP_PROFILES = {
     thunderbolt: { range: { min: 20, max:  90 },                coolMax: 50, warmMax: 65, hotMax: 80 },
 } as const satisfies Record<string, MetricProfile>;
 
-/** Power profiles (watts). Range tuned so a 50 W reading on CPU lands at
- *  roughly the same column height as a 50 W reading on GPU — visual
- *  comparability across keys. Bands tuned for Intel Mac TDPs. */
+/** Power profiles (watts). Ranges and bands tuned to actual Intel Mac
+ *  TDPs (researched per model). The reference "peak" for the meter's
+ *  full-scale fill is the 10-core iMac 27" (125 W TDP, ~170 W boost) for
+ *  CPU, and the iMac 27" 2020 high-end Radeon Pro 5700 XT (130 W TDP)
+ *  for GPU. Lower-TDP Macs (laptops, Mac mini) fill less of the meter at
+ *  full load, which is honest — they really do consume less. */
 export const POWER_PROFILES = {
-    // Most Intel Mac CPUs cap at ~95 W TDP (desktop) or 28-45 W (laptop);
-    // iMac Pro Xeons can go higher. 150 W covers the common cases.
-    cpu: { range: { min: 0, max: 150 }, coolMax: 30, warmMax: 70, hotMax: 110 },
-    // Discrete GPUs in iMacs can pull 150-180 W under load.
-    gpu: { range: { min: 0, max: 200 }, coolMax: 30, warmMax: 80, hotMax: 150 },
+    cpu: { range: { min: 0, max: 125 }, coolMax: 40, warmMax: 70, hotMax: 100 },
+    gpu: { range: { min: 0, max: 150 }, coolMax: 25, warmMax: 70, hotMax: 130 },
 } as const satisfies Record<string, MetricProfile>;
 
 /** Classify a numeric reading into a color band using a profile.

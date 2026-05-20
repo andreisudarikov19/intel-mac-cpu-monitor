@@ -220,15 +220,15 @@ function renderValueOnly(input: RenderInput): string {
  * to graph view.
  */
 function renderMeter(input: RenderInput): string {
-    const SEGMENTS = 12;
+    const SEGMENTS = 9;                     // chunky bars beat fine resolution
     const GAP = 2;                          // px between segments
     const COL_TOP = 32;                     // y where column begins
     const COL_BOTTOM = 124;                 // y where column ends — leaves
                                             // room for value text below
-    const COL_X = 49;                       // left edge of column
-    const COL_W = 46;                       // column width
+    const COL_X = 14;                       // left edge — 14 px margin each side
+    const COL_W = 116;                      // 116 px wide ≈ 80 % of canvas
     const COL_H = COL_BOTTOM - COL_TOP;     // 92 px
-    const SEG_H = (COL_H - (SEGMENTS - 1) * GAP) / SEGMENTS;  // ≈ 5.83 px each
+    const SEG_H = (COL_H - (SEGMENTS - 1) * GAP) / SEGMENTS;  // ≈ 8.44 px each
 
     const headerColor = input.noData ? NO_DATA_COLOR : TEXT_COLOR;
     const headerText = input.noData ? "No data" : input.label;
@@ -264,7 +264,7 @@ function renderMeter(input: RenderInput): string {
         const opacity = isLit ? "1" : "0.18";
         segments.push(
             `<rect x="${COL_X}" y="${y.toFixed(2)}" width="${COL_W}" height="${SEG_H.toFixed(2)}" ` +
-            `rx="1.5" fill="${color}" fill-opacity="${opacity}"/>`
+            `rx="2" fill="${color}" fill-opacity="${opacity}"/>`
         );
     }
 

@@ -400,14 +400,24 @@ export class Hub {
             valueText = `${Math.round(latest)}`;
             band = fanBand(latest, max);
         }
+        // Percentage-based profile so long-press meter view works for
+        // fans too — bands at 30 / 70 / 100 % of max RPM mirror fanBand.
+        const fanProfile: MetricProfile = {
+            range: { min: 0, max },
+            coolMax: max * 0.3,
+            warmMax: max * 0.7,
+            hotMax: max,
+        };
         return {
             label,
             valueText,
             band,
             noData,
             samples: sub.history.toArray(),
-            range: { min: 0, max },
+            range: fanProfile.range,
             viewMode: sub.viewMode,
+            rawValue: latest,
+            profile: fanProfile,
         };
     }
 }

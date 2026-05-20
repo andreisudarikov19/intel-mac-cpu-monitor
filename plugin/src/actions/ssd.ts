@@ -5,9 +5,10 @@ import {
     type WillDisappearEvent,
     type DidReceiveSettingsEvent,
     type KeyDownEvent,
+    type KeyUpEvent,
 } from "@elgato/streamdeck";
 import { hub, type ViewMode } from "../hub.js";
-import { toggleView } from "./toggle-view.js";
+import { handleKeyDown, handleKeyUp } from "./toggle-view.js";
 
 type Settings = {
     tempUnit?: "C" | "F";
@@ -46,7 +47,11 @@ export class SSDTempAction extends SingletonAction<Settings> {
         );
     }
 
-    override onKeyDown(ev: KeyDownEvent<Settings>): Promise<void> {
-        return toggleView(ev);
+    override onKeyDown(ev: KeyDownEvent<Settings>): void {
+        handleKeyDown(ev);
+    }
+
+    override onKeyUp(ev: KeyUpEvent<Settings>): void {
+        handleKeyUp(ev);
     }
 }

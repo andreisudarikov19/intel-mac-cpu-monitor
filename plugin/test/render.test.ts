@@ -186,8 +186,9 @@ describe("renderSVG value-only view", () => {
 
 describe("renderSVG meter (VU) view", () => {
     // For meter view we need POWER_PROFILES and a numeric rawValue.
-    // Helper to construct a representative meter input.
-    const makeMeterInput = (rawValue: number | null, range = { min: 0, max: 150 }): RenderInput => ({
+    // Helper builds a CPU-power-shaped meter input (range 0–125W,
+    // bands matching the real POWER_PROFILES.cpu).
+    const makeMeterInput = (rawValue: number | null, range = { min: 0, max: 125 }): RenderInput => ({
         label: "CPU",
         valueText: rawValue == null ? "" : `${Math.round(rawValue)}W`,
         band: "cool",
@@ -196,26 +197,25 @@ describe("renderSVG meter (VU) view", () => {
         range,
         viewMode: "meter",
         rawValue,
-        profile: { range, coolMax: 30, warmMax: 70, hotMax: 110 },
+        profile: { range, coolMax: 40, warmMax: 70, hotMax: 100 },
     });
 
-    it("renders 12 segments (the VU column)", () => {
+    it("renders 9 segments (the VU column)", () => {
         const svg = renderSVG(makeMeterInput(50));
-        // Segments are <rect> with fill-opacity attributes (not the bg or
-        // value text, neither of which use fill-opacity). Count those.
+        // Each segment carries a fill-opacity attribute. Count them.
         const segmentCount = (svg.match(/fill-opacity="/g) ?? []).length;
-        expect(segmentCount).toBe(12);
+        expect(segmentCount).toBe(9);
     });
 
     it("lights up a proportional number of segments based on value", () => {
-        // 75/150 = 0.5 ⇒ ~6 lit segments out of 12.
-        const svg = renderSVG(makeMeterInput(75));
+        // 62.5/125 = 0.5 ⇒ ~5 lit segments out of 9 (round(4.5)).
+        const svg = renderSVG(makeMeterInput(62.5));
         const litCount = (svg.match(/fill-opacity="1"/g) ?? []).length;
         const dimCount = (svg.match(/fill-opacity="0\.18"/g) ?? []).length;
-        expect(litCount + dimCount).toBe(12);
-        // Allow ±1 segment for rounding.
-        expect(litCount).toBeGreaterThanOrEqual(5);
-        expect(litCount).toBeLessThanOrEqual(7);
+        expect(litCount + dimCount).toBe(9);
+        // Allow ±1 for rounding.
+        expect(litCount).toBeGreaterThanOrEqual(4);
+        expect(litCount).toBeLessThanOrEqual(5);
     });
 
     it("lights no segments at value 0", () => {
@@ -224,16 +224,15 @@ describe("renderSVG meter (VU) view", () => {
         expect(litCount).toBe(0);
     });
 
-    it("lights all 12 segments at or above the range max", () => {
-        const svg = renderSVG(makeMeterInput(200));  // > range max 150
+    it("lights all 9 segments at or above the range max", () => {
+        const svg = renderSVG(makeMeterInput(200));  // > range max 125
         const litCount = (svg.match(/fill-opacity="1"/g) ?? []).length;
-        expect(litCount).toBe(12);
+        expect(litCount).toBe(9);
     });
 
     it("assigns per-segment colors so the column transitions cool→warm→hot→critical bottom-up", () => {
-        const svg = renderSVG(makeMeterInput(150));  // all lit
+        const svg = renderSVG(makeMeterInput(125));  // all lit
         // The column should contain all four band colors at full opacity.
-        // Use a permissive check: each color appears at least once.
         expect(svg).toContain(COLORS.cool);
         expect(svg).toContain(COLORS.warm);
         expect(svg).toContain(COLORS.hot);
@@ -245,12 +244,22 @@ describe("renderSVG meter (VU) view", () => {
         // Header switches to alert color
         expect(svg).toContain(NO_DATA_COLOR);
         expect(svg).toContain(">No data<");
-        // All 12 segments still drawn (as dim outlines)
+        // All 9 segments still drawn (as dim outlines)
         const segmentCount = (svg.match(/fill-opacity="/g) ?? []).length;
-        expect(segmentCount).toBe(12);
+        expect(segmentCount).toBe(9);
         // No lit segments
         const litCount = (svg.match(/fill-opacity="1"/g) ?? []).length;
         expect(litCount).toBe(0);
+    });
+
+    it("segment width is wide enough to dominate the canvas (>80px)", () => {
+        // Regression test for the 12→9 redesign: bars must be visibly
+        // chunky, not skinny in the middle of empty margins.
+        const svg = renderSVG(makeMeterInput(50));
+        // Grab the first segment's width attribute.
+        const widthMatch = svg.match(/<rect x="\d+" y="[\d.]+" width="(\d+)" height="[\d.]+"/);
+        expect(widthMatch).not.toBeNull();
+        expect(parseInt(widthMatch![1]!, 10)).toBeGreaterThanOrEqual(80);
     });
 
     it("omits sparkline paths (meter ≠ graph)", () => {

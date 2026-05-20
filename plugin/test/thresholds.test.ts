@@ -176,21 +176,37 @@ describe("per-sensor temperature profiles", () => {
 });
 
 describe("power profiles", () => {
-    it("CPU power: 5W idle cool, 50W warm, 90W hot, 120W critical", () => {
+    // CPU thresholds tuned against actual Intel Mac TDPs: laptops 15–45 W,
+    // iMac 21.5"/Mac mini 65 W, iMac 27" 6/8-core 95 W, iMac 27" 10-core
+    // 125 W (the reference machine for "full-scale" on the meter).
+
+    it("CPU power: 10W laptop idle cool, 45W laptop full warm, 95W iMac hot, 110W boost critical", () => {
         const p = POWER_PROFILES.cpu;
-        expect(bandFor(5, p)).toBe("cool");
-        expect(bandFor(30, p)).toBe("cool");
-        expect(bandFor(50, p)).toBe("warm");
-        expect(bandFor(90, p)).toBe("hot");
-        expect(bandFor(120, p)).toBe("critical");
+        expect(bandFor(10, p)).toBe("cool");       // any laptop idle
+        expect(bandFor(40, p)).toBe("cool");       // 13" MBP TDP
+        expect(bandFor(45, p)).toBe("warm");       // 16" MBP TDP
+        expect(bandFor(95, p)).toBe("hot");        // iMac 27" 8-core TDP
+        expect(bandFor(110, p)).toBe("critical");  // sustained boost on 10-core
     });
 
-    it("GPU power: bands tuned higher than CPU (discrete cards pull more)", () => {
+    it("CPU power: range fits the 10-core iMac so its peak boost fills the meter", () => {
+        // 125 W TDP, ~170 W peak boost. Range max = 125 means peak boost
+        // overflows into "critical" rather than running off-screen.
+        expect(POWER_PROFILES.cpu.range.max).toBe(125);
+    });
+
+    it("GPU power: 5W idle cool, 50W warm, 120W hot, 140W critical", () => {
         const p = POWER_PROFILES.gpu;
-        expect(bandFor(5, p)).toBe("cool");
-        expect(bandFor(50, p)).toBe("warm");
-        expect(bandFor(120, p)).toBe("hot");
-        expect(bandFor(180, p)).toBe("critical");
+        expect(bandFor(5, p)).toBe("cool");        // integrated GPU idle
+        expect(bandFor(25, p)).toBe("cool");       // integrated GPU full
+        expect(bandFor(50, p)).toBe("warm");       // moderate discrete load
+        expect(bandFor(120, p)).toBe("hot");       // heavy discrete load
+        expect(bandFor(140, p)).toBe("critical");  // above 130W TDP threshold
+    });
+
+    it("GPU power: range fits Radeon Pro 5700 XT (the high-end iMac 27\" 2020)", () => {
+        expect(POWER_PROFILES.gpu.range.max).toBe(150);
+        expect(POWER_PROFILES.gpu.hotMax).toBe(130);  // = 5700 XT TDP
     });
 
     it("power profiles never enter the cold band (only ambient air does)", () => {
