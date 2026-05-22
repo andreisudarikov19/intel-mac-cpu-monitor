@@ -8,10 +8,12 @@ import {
     type KeyUpEvent,
 } from "@elgato/streamdeck";
 import { hub, type ViewMode } from "../hub.js";
-import { handleKeyDown, handleKeyUp } from "./toggle-view.js";
+import { handleKeyDown, handleKeyUp, extractSampleOverride } from "./toggle-view.js";
 
 type Settings = {
     viewMode?: ViewMode;
+    sampleCount?: number;
+    sampleScope?: "global" | "tile";
 };
 
 @action({ UUID: "dev.andreisudarikov.intel-mac-monitor.gpu-power" })
@@ -24,6 +26,7 @@ export class GPUPowerAction extends SingletonAction<Settings> {
             },
             { kind: "gpuPower" },
             ev.payload.settings.viewMode ?? "graph",
+        extractSampleOverride(ev.payload.settings),
         );
     }
 
@@ -39,6 +42,7 @@ export class GPUPowerAction extends SingletonAction<Settings> {
             },
             { kind: "gpuPower" },
             ev.payload.settings.viewMode ?? "graph",
+        extractSampleOverride(ev.payload.settings),
         );
     }
 

@@ -10,12 +10,14 @@ import streamDeck, {
 } from "@elgato/streamdeck";
 import type { JsonValue } from "@elgato/utils";
 import { hub, type ViewMode } from "../hub.js";
-import { handleKeyDown, handleKeyUp } from "./toggle-view.js";
+import { handleKeyDown, handleKeyUp, extractSampleOverride } from "./toggle-view.js";
 
 type Settings = {
     /** sdpi-select returns its `value` as a string; pickFanIndex coerces. */
     fanIndex?: number | string;
     viewMode?: ViewMode;
+    sampleCount?: number;
+    sampleScope?: "global" | "tile";
 };
 
 @action({ UUID: "dev.andreisudarikov.intel-mac-monitor.fan" })
@@ -29,6 +31,7 @@ export class FanSpeedAction extends SingletonAction<Settings> {
             },
             { kind: "fan", fanIndex: idx },
             ev.payload.settings.viewMode ?? "graph",
+        extractSampleOverride(ev.payload.settings),
         );
     }
 
@@ -45,6 +48,7 @@ export class FanSpeedAction extends SingletonAction<Settings> {
             },
             { kind: "fan", fanIndex: idx },
             ev.payload.settings.viewMode ?? "graph",
+        extractSampleOverride(ev.payload.settings),
         );
     }
 

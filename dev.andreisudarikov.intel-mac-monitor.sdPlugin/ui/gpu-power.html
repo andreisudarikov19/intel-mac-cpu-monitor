@@ -9,5 +9,35 @@
         <sdpi-item>
             <sdpi-message>Tap the key to switch between graph and VU meter views.</sdpi-message>
         </sdpi-item>
+        <sdpi-item label="Sample window">
+            <sdpi-select setting="sampleScope" default="global">
+                <option value="global">Plugin default (all keys)</option>
+                <option value="tile">This key only</option>
+            </sdpi-select>
+        </sdpi-item>
+        <sdpi-item label="Samples" id="sd-sample-count-tile" hidden>
+            <sdpi-range setting="sampleCount" min="15" max="60" step="5" default="30" showlabels></sdpi-range>
+        </sdpi-item>
+        <script>
+            // Show the per-tile slider only when scope = "This key only".
+            // Polling instead of event listeners because sdpi-components'
+            // value-change events don't reliably fire when switching back
+            // to the default option — observed in v1.3.2.
+            (function () {
+                let lastScope = null;
+                function tick() {
+                    const dd = document.querySelector('sdpi-select[setting="sampleScope"]');
+                    if (!dd) return;
+                    const scope = dd.value;
+                    if (scope === lastScope) return;
+                    lastScope = scope;
+                    const isTile = scope === "tile";
+                    const t = document.getElementById("sd-sample-count-tile");
+                    if (t) t.hidden = !isTile;
+                }
+                setInterval(tick, 200);   // 5 × / sec is plenty
+                tick();
+            })();
+        </script>
     </body>
 </html>

@@ -8,11 +8,15 @@ import {
     type KeyUpEvent,
 } from "@elgato/streamdeck";
 import { hub, type ViewMode } from "../hub.js";
-import { handleKeyDown, handleKeyUp } from "./toggle-view.js";
+import { handleKeyDown, handleKeyUp, extractSampleOverride } from "./toggle-view.js";
 
 type Settings = {
     tempUnit?: "C" | "F";
     viewMode?: ViewMode;
+    /** Per-tile override for graph sample count; falls through to the
+     *  plugin-wide default when undefined. */
+    sampleCount?: number;
+    sampleScope?: "global" | "tile";
 };
 
 @action({ UUID: "dev.andreisudarikov.intel-mac-monitor.cpu" })
@@ -25,6 +29,7 @@ export class CPUTempAction extends SingletonAction<Settings> {
             },
             { kind: "cpu" },
             ev.payload.settings.viewMode ?? "graph",
+            extractSampleOverride(ev.payload.settings),
         );
     }
 
@@ -44,6 +49,7 @@ export class CPUTempAction extends SingletonAction<Settings> {
             },
             { kind: "cpu" },
             s.viewMode ?? "graph",
+            extractSampleOverride(s),
         );
     }
 

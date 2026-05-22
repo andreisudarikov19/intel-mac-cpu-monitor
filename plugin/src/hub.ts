@@ -26,10 +26,26 @@ import {
     type MetricProfile,
 } from "./thresholds.js";
 
-// 45-sample ring buffer (= 45 s at 1 Hz). The graph only renders the most
-// recent 30 (see render.ts VISIBLE_SAMPLES); the extra 15 sit in reserve
-// for any future zoom-out / longer-window feature.
-const HISTORY_SIZE = 45;
+/** Bounds and default for the user-facing sample-count slider (v1.3+).
+ *  Range chosen to avoid the v1.1-era "hair vs goosebumps" trap:
+ *  under 15 looks chunky and noisy, over 60 the line goes too thin. */
+export const SAMPLE_COUNT_MIN = 15;
+export const SAMPLE_COUNT_MAX = 60;
+export const SAMPLE_COUNT_STEP = 5;
+export const SAMPLE_COUNT_DEFAULT = 30;
+
+/** Buffer size = visible × 1.5 (rounded up). Per v1.3 spec — keeps a bit
+ *  of recent-but-offscreen history in reserve for future "zoom out". */
+export function bufferSizeFor(visible: number): number {
+    return Math.ceil(visible * 1.5);
+}
+
+/** Clamp + step-snap a sample-count value to the slider's permitted set. */
+export function clampSampleCount(n: number | undefined | null): number {
+    if (typeof n !== "number" || !Number.isFinite(n)) return SAMPLE_COUNT_DEFAULT;
+    const stepped = Math.round(n / SAMPLE_COUNT_STEP) * SAMPLE_COUNT_STEP;
+    return Math.max(SAMPLE_COUNT_MIN, Math.min(SAMPLE_COUNT_MAX, stepped));
+}
 
 /** Visual mode for a single key.
  *  - "graph": default — header + value + sparkline (current behavior)
@@ -41,6 +57,10 @@ export type ViewMode = "graph" | "value" | "meter";
 export type GlobalSettings = {
     /** "C" or "F". Default "C". */
     tempUnit?: "C" | "F";
+    /** Plugin-wide default for graph sample count. Applies to every key
+     *  whose own settings don't specify a `sampleCount` override.
+     *  Defaults to SAMPLE_COUNT_DEFAULT when unset. */
+    defaultSampleCount?: number;
 };
 
 export type Subscriber = {
@@ -70,6 +90,12 @@ type Subscription = {
     kind: SubscriptionKind;
     history: History;
     viewMode: ViewMode;
+    /** Per-tile override. `undefined` means "follow plugin default". */
+    sampleCountOverride: number | undefined;
+    /** Effective number of samples to render on the graph (the result of
+     *  applying override / global default / hard default precedence).
+     *  Cached here so we can detect changes and resize the buffer. */
+    visible: number;
 };
 
 export class Hub {
@@ -116,11 +142,36 @@ export class Hub {
     }
 
     setGlobalSettings(s: GlobalSettings): void {
+        const prevDefault = this.globalSettings.defaultSampleCount ?? SAMPLE_COUNT_DEFAULT;
         this.globalSettings = { ...this.globalSettings, ...s };
-        // Re-render everything immediately so unit changes appear without delay.
+        const newDefault = this.globalSettings.defaultSampleCount ?? SAMPLE_COUNT_DEFAULT;
+
+        // If the plugin-wide default changed, re-evaluate every subscription
+        // that's using the default (no per-tile override). Resize their
+        // history buffers and re-render.
+        const defaultChanged = prevDefault !== newDefault;
+
         for (const sub of this.subscriptions.values()) {
+            if (defaultChanged && sub.sampleCountOverride === undefined) {
+                this.applyVisibleChange(sub, newDefault);
+            }
             this.renderAndPush(sub).catch((e) => streamDeck.logger.error(String(e)));
         }
+    }
+
+    /** Compute the effective visible-sample count for a subscription:
+     *  per-tile override → plugin default → hard default. */
+    private effectiveVisible(override: number | undefined): number {
+        if (override !== undefined) return clampSampleCount(override);
+        return clampSampleCount(this.globalSettings.defaultSampleCount);
+    }
+
+    /** Resize a subscription's history buffer to match a new visible count.
+     *  Preserves the most recent samples that fit in the new buffer. */
+    private applyVisibleChange(sub: Subscription, newVisible: number): void {
+        if (newVisible === sub.visible) return;
+        sub.visible = newVisible;
+        sub.history.resize(bufferSizeFor(newVisible));
     }
 
     getGlobalSettings(): GlobalSettings {
@@ -131,25 +182,52 @@ export class Hub {
      *  for the same contextId. If the new subscription has the same kind as
      *  the existing one, history is preserved (no flicker on settings save).
      */
-    subscribe(subscriber: Subscriber, kind: SubscriptionKind, viewMode: ViewMode = "graph"): void {
+    subscribe(
+        subscriber: Subscriber,
+        kind: SubscriptionKind,
+        viewMode: ViewMode = "graph",
+        sampleCountOverride: number | undefined = undefined,
+    ): void {
         const existing = this.subscriptions.get(subscriber.contextId);
+        const visible = this.effectiveVisible(sampleCountOverride);
+
         if (existing && subscriptionKindsEqual(existing.kind, kind)) {
             // Same metric/sensor — refresh the subscriber reference and
-            // view mode, keep history.
+            // view mode, keep history. Resize buffer iff visible count
+            // actually changed.
             existing.subscriber = subscriber;
             existing.viewMode = viewMode;
+            existing.sampleCountOverride = sampleCountOverride;
+            this.applyVisibleChange(existing, visible);
             this.renderAndPush(existing).catch((e) => streamDeck.logger.error(String(e)));
             return;
         }
         const sub: Subscription = {
             subscriber,
             kind,
-            history: new History(HISTORY_SIZE),
+            history: new History(bufferSizeFor(visible)),
             viewMode,
+            sampleCountOverride,
+            visible,
         };
         this.subscriptions.set(subscriber.contextId, sub);
         // Render current state immediately (likely "No data" until first reading).
         this.renderAndPush(sub).catch((e) => streamDeck.logger.error(String(e)));
+    }
+
+    /** Returns the current effective visible-sample count for a context,
+     *  or undefined if no subscription exists. Primarily a hook for
+     *  tests to verify sample-count transitions; safe to call from
+     *  production code too. */
+    getVisibleSampleCount(contextId: string): number | undefined {
+        return this.subscriptions.get(contextId)?.visible;
+    }
+
+    /** Returns the current history buffer capacity for a context, or
+     *  undefined if no subscription. Lets tests verify the buffer
+     *  resizes correctly when override changes. */
+    getBufferCapacity(contextId: string): number | undefined {
+        return this.subscriptions.get(contextId)?.history.capacity;
     }
 
     /** Update only the view mode of an existing subscription, preserving
@@ -285,6 +363,7 @@ export class Hub {
             noData: true,
             samples: [],
             range: TEMP_PROFILES.cpu.range,
+            visibleSamples: SAMPLE_COUNT_DEFAULT,
         });
         await sub.subscriber.setImage(svgDataUri(svg));
     }
@@ -353,6 +432,7 @@ export class Hub {
             viewMode: sub.viewMode,
             rawValue: latest,
             profile,
+            visibleSamples: sub.visible,
         };
     }
 
@@ -383,6 +463,7 @@ export class Hub {
             viewMode: sub.viewMode,
             rawValue: latest,
             profile,
+            visibleSamples: sub.visible,
         };
     }
 
@@ -418,6 +499,7 @@ export class Hub {
             viewMode: sub.viewMode,
             rawValue: latest,
             profile: fanProfile,
+            visibleSamples: sub.visible,
         };
     }
 }

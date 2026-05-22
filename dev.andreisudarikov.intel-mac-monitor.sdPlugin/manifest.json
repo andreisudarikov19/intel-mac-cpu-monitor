@@ -2,7 +2,7 @@
   "Name": "Intel Mac Hardware Monitor",
   "Author": "Andrei Sudarikov",
   "Description": "Live thermal, fan, and power readouts on your Stream Deck for Intel Macs (T2 and pre-T2). Tap a key to switch the graph view to a slide; long-press to switch to a VU-meter view.",
-  "Version": "1.2.3.0",
+  "Version": "1.3.3.0",
   "UUID": "dev.andreisudarikov.intel-mac-monitor",
   "SDKVersion": 3,
   "Icon": "imgs/plugin/icon",

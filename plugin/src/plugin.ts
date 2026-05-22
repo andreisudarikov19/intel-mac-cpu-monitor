@@ -31,21 +31,27 @@ streamDeck.actions.registerAction(new ThunderboltTempAction());
 streamDeck.actions.registerAction(new CPUPowerAction());
 streamDeck.actions.registerAction(new GPUPowerAction());
 
-// Restore the user's preferred temperature unit from persistent global
-// settings before the first reading lands.
-streamDeck.settings.onDidReceiveGlobalSettings<GlobalSettings>((ev) => {
-    const s = ev.settings ?? {};
+// Restore persistent global settings before the first reading lands.
+// Listens to both the initial fetch and live updates from any PI.
+function applyGlobalSettings(s: GlobalSettings): void {
+    const patch: GlobalSettings = {};
     if (s.tempUnit === "C" || s.tempUnit === "F") {
-        hub.setGlobalSettings({ tempUnit: s.tempUnit });
+        patch.tempUnit = s.tempUnit;
     }
+    if (typeof s.defaultSampleCount === "number" && Number.isFinite(s.defaultSampleCount)) {
+        patch.defaultSampleCount = s.defaultSampleCount;
+    }
+    if (Object.keys(patch).length > 0) {
+        hub.setGlobalSettings(patch);
+    }
+}
+
+streamDeck.settings.onDidReceiveGlobalSettings<GlobalSettings>((ev) => {
+    applyGlobalSettings(ev.settings ?? {});
 });
 streamDeck.settings
     .getGlobalSettings<GlobalSettings>()
-    .then((s) => {
-        if (s.tempUnit === "C" || s.tempUnit === "F") {
-            hub.setGlobalSettings({ tempUnit: s.tempUnit });
-        }
-    })
+    .then((s) => applyGlobalSettings(s))
     .catch((err) => streamDeck.logger.warn(`getGlobalSettings failed: ${err}`));
 
 // Persist global settings whenever the in-memory copy changes (currently

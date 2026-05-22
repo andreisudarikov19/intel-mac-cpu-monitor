@@ -8,11 +8,13 @@ import {
     type KeyUpEvent,
 } from "@elgato/streamdeck";
 import { hub, type ViewMode } from "../hub.js";
-import { handleKeyDown, handleKeyUp } from "./toggle-view.js";
+import { handleKeyDown, handleKeyUp, extractSampleOverride } from "./toggle-view.js";
 
 type Settings = {
     tempUnit?: "C" | "F";
     viewMode?: ViewMode;
+    sampleCount?: number;
+    sampleScope?: "global" | "tile";
 };
 
 @action({ UUID: "dev.andreisudarikov.intel-mac-monitor.ssd" })
@@ -25,6 +27,7 @@ export class SSDTempAction extends SingletonAction<Settings> {
             },
             { kind: "ssd" },
             ev.payload.settings.viewMode ?? "graph",
+        extractSampleOverride(ev.payload.settings),
         );
     }
 
@@ -44,6 +47,7 @@ export class SSDTempAction extends SingletonAction<Settings> {
             },
             { kind: "ssd" },
             s.viewMode ?? "graph",
+        extractSampleOverride(s),
         );
     }
 

@@ -18,6 +18,18 @@ type SettingsWithViewMode = {
     viewMode?: ViewMode;
 };
 
+/** Extract the effective per-tile sample-count override from settings.
+ *  Returns the override (a number) when `sampleScope === "tile"`,
+ *  otherwise undefined (= follow the plugin-wide default).
+ *
+ *  Lives here so every action can pass `extractSampleOverride(settings)`
+ *  to `hub.subscribe` without duplicating the scope check. */
+export function extractSampleOverride(
+    settings: { sampleScope?: string; sampleCount?: number },
+): number | undefined {
+    return settings.sampleScope === "tile" ? settings.sampleCount : undefined;
+}
+
 type PressRecord = {
     timer: NodeJS.Timeout;
     longTriggered: boolean;
