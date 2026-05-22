@@ -103,24 +103,28 @@ export const RAM_USAGE_PROFILE: MetricProfile = {
     hotMax: 90,
 };
 
-/** Disk I/O profile (combined read + write, bytes/sec).
- *  Range tuned for modern Intel-Mac NVMe SSDs (PCIe 3.0 x4, ~3 GB/s
- *  peak read). Bands:
- *    cool ≤ 10 MB/s — quiet, periodic writes
- *    warm ≤ 100 MB/s — active app I/O (compile, file copy)
- *    hot ≤ 1 GB/s — heavy throughput (video edit, build cache fill)
- *    critical > 1 GB/s — sustained max-speed transfers
- *  Older SATA SSDs (~500 MB/s peak) will never reach the "critical"
- *  band, which is honest.
+/** Disk I/O profile (per-stream bytes/sec; each of read & write is
+ *  classified independently in the dual-stream meter).
  *
- *  Values are in BYTES per second so they match the helper's
- *  per-tick sample directly. Display formatting (MB/s, GB/s) is
- *  done in the hub. */
+ *  Range tuned to typical Mac usage rather than PCIe theoretical max:
+ *  modern NVMe can technically hit 3 GB/s, but virtually no real
+ *  workload sustains anywhere close. Capping the range at 1 GB/s
+ *  means common operations (compile, file copy) get visible meter
+ *  movement; saturating transfers > 1 GB/s correctly read as
+ *  "critical, full meter" rather than getting lost in the 0–3 GB/s
+ *  void.
+ *
+ *  Bands tuned so segment 0 (top = 111 MB/s) lands inside the cool
+ *  zone — fixes the v1.4 "no green segments" complaint where
+ *  everything past idle showed orange/red.
+ *
+ *  Values are in BYTES/sec; display formatting (MB/s, GB/s, KB/s)
+ *  is done in the hub. */
 export const DISK_IO_PROFILE: MetricProfile = {
-    range: { min: 0, max: 3_000_000_000 },     // 3 GB/s = upper PCIe NVMe ceiling
-    coolMax: 10_000_000,                       // 10 MB/s
-    warmMax: 100_000_000,                      // 100 MB/s
-    hotMax: 1_000_000_000,                     // 1 GB/s
+    range: { min: 0, max: 1_000_000_000 },     // 1 GB/s = common saturation point
+    coolMax:    200_000_000,                    // 200 MB/s — moderate sustained I/O
+    warmMax:    500_000_000,                    // 500 MB/s — heavy transfer
+    hotMax:     800_000_000,                    // 800 MB/s — near saturation
 };
 
 /** Classify a numeric reading into a color band using a profile.
@@ -143,16 +147,44 @@ export function tempBand(celsius: number): Band {
 }
 
 /**
- * Classify a fan RPM into a color band, scaled by the fan's max RPM.
- * Spec: ≤30% green, ≤70% yellow, ≤100% orange, >100% red.
+ * Classify a fan RPM into a color band, scaled by the fan's *usable
+ * range* — `min..max` rather than `0..max`. The "ratio" is how far
+ * above the minimum the fan is spinning, as a fraction of the spinup
+ * room it has.
+ *
+ * Pre-v1.5 this took only `maxRPM` and bands were 30/70/100 % of max.
+ * That misclassified Intel Mac fans whose idle floor (e.g. 1200 RPM
+ * on the 27" iMac) sits well above the original "cool" threshold —
+ * the meter showed yellow at idle. v1.5 anchors bands to the usable
+ * range so idle reads as cool and approaching max reads as critical.
+ *
+ * Thresholds: ≤ 40 % cool, ≤ 70 % warm, ≤ 90 % hot, > 90 % critical.
  */
-export function fanBand(rpm: number, maxRPM: number): Band {
-    if (maxRPM <= 0) return "cool";
-    const pct = rpm / maxRPM;
-    if (pct <= 0.30) return "cool";
-    if (pct <= 0.70) return "warm";
-    if (pct <= 1.0)  return "hot";
+export function fanBand(rpm: number, minRPM: number, maxRPM: number): Band {
+    const usable = maxRPM - minRPM;
+    if (usable <= 0) return "cool";
+    const ratio = (rpm - minRPM) / usable;
+    if (ratio <= 0.40) return "cool";
+    if (ratio <= 0.70) return "warm";
+    if (ratio <= 0.90) return "hot";
     return "critical";
+}
+
+/**
+ * Build a per-fan MetricProfile from its reported min/max RPM.
+ * Used by the hub for graph (Y-axis) and meter (segment colors).
+ * Range starts at minRPM so the meter shows 0 lit segments at idle
+ * and fills as the fan spins up — the "spike against the minimum"
+ * the v1.5 calibration targets.
+ */
+export function fanProfileFor(minRPM: number, maxRPM: number): MetricProfile {
+    const usable = Math.max(1, maxRPM - minRPM);
+    return {
+        range: { min: minRPM, max: maxRPM },
+        coolMax: minRPM + usable * 0.40,
+        warmMax: minRPM + usable * 0.70,
+        hotMax:  minRPM + usable * 0.90,
+    };
 }
 
 /** Celsius ↔ Fahrenheit conversion. */
