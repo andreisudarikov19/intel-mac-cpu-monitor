@@ -15,6 +15,48 @@ not the development journey. Append new versions to the top.
 
 ---
 
+## v1.2.3 (2026-05-20)
+
+Bug-fix release. Fixes a "ghost no-data" state that affected the CPU
+package, ambient air, and RAM keys after the Mac woke from sleep —
+those sensors would persistently show "No data" until the user
+restarted Stream Deck.
+
+### Fixed
+- **Stale AppleSMC connection after sleep/wake**: certain
+  package-level SMC keys (`TCAD` / `TC0F` / `TA0P` / `Ts0S` and
+  friends) silently stopped returning data after the system slept,
+  even though the helper kept polling. Per-core CPU, GPU, fans, and
+  SSD were unaffected because their reads go through different
+  internal routing. The helper now detects long pauses between timer
+  ticks (>10 s gap = process was paused) and recycles its IOKit
+  AppleSMC connection in place via a new `SMC.reset()` method. First
+  tick after wake shows live data again.
+
+### How the detection works
+- Helper's timer is supposed to fire every 1 s. A gap >10 s between
+  consecutive ticks means the process was paused — sleep/wake,
+  SIGSTOP, debugger attach, anything. Cheap to check (one timestamp
+  comparison per tick); false positives are harmless (a redundant SMC
+  reset costs ~µs of kernel work).
+- If `SMC.reset()` itself fails (rare — would require AppleSMC kext to
+  have unloaded), the helper exits and the plugin supervisor respawns
+  it — the existing fallback path.
+
+### Added
+- `SMC.reset()` — close current `io_connect_t`, reopen via
+  `IOServiceOpen`. Shared init logic factored into private
+  `openConnection()`.
+- Stderr log line `smc: reset after Ns gap (likely sleep/wake)` so
+  the plugin log shows when the recovery fired.
+
+### Notes
+- No new SMC keys, no new actions, no UI changes. Pure runtime
+  reliability fix.
+- Tests unchanged.
+
+---
+
 ## v1.2.2 (2026-05-20)
 
 Release-hygiene fix. The manifest's `Version` field had been stuck at
@@ -442,7 +484,7 @@ Power profiles (W) — tuned against actual Intel Mac TDPs (laptops
 
 ---
 
-## Cumulative current state (post-v1.2.2)
+## Cumulative current state (post-v1.2.3)
 
 | | Count |
 |---|---|
