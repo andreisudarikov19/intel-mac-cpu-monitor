@@ -15,6 +15,141 @@ not the development journey. Append new versions to the top.
 
 ---
 
+## v1.3.3 (2026-05-20)
+
+Bug-fix release. Two issues reported against v1.3.2:
+
+### Fixed
+- **PI slider didn't hide when switching back to "Plugin default"** after
+  having been set to "This key only". Root cause: sdpi-components' value-
+  change DOM events fire inconsistently when the dropdown returns to its
+  initial option — sometimes `valueChanged` fires, sometimes not, and
+  `change` is similarly unreliable. Replaced the event-listener approach
+  with a 5 Hz `setInterval` poll on the dropdown's `value` property.
+  Polling is cheap (the PI window is only open while user is configuring
+  a key) and bulletproof against whatever sdpi-components decides to emit.
+
+### Verified (no code change, regression test added)
+- **Visible sample count and buffer capacity revert to the plugin default
+  (30 / 45)** when a per-tile override is cleared via the scope dropdown.
+  Path: `extractSampleOverride` returns `undefined` → `Hub.subscribe`
+  computes `effectiveVisible(undefined)` → 30 → `applyVisibleChange`
+  resizes buffer from 90 to 45. Added 5 direct tests against the Hub
+  (`test/hub-sample-count.test.ts`) covering: default-when-no-override,
+  override-applied, override-cleared-reverts, plugin-default-change-
+  propagates, out-of-range-override-clamps. All pass.
+
+### Added
+- `Hub.getVisibleSampleCount(contextId)` and `Hub.getBufferCapacity(contextId)`
+  — public accessors, intended primarily for tests. Both return undefined
+  when the context isn't subscribed.
+
+### Tests
+- 86 Swift + 102 TypeScript = **188 total** (up from 183).
+
+---
+
+## v1.3.2 (2026-05-20)
+
+PI label cleanup. The per-tile slider was labeled `Samples (this key)`
+— a remnant from the v1.3.0 design where two sliders coexisted and
+needed disambiguating. Since v1.3.1 only ever shows one slider, the
+parenthetical is redundant.
+
+### Changed
+- PI label `Samples (this key)` → `Samples` across all 12 action PIs.
+
+### Tests
+- No code changes; **183 tests unchanged**.
+
+---
+
+## v1.3.1 (2026-05-20)
+
+UI consistency polish on top of v1.3.0. In "Plugin default" mode the
+slider is now hidden entirely — only when the user picks "This key
+only" does a slider appear (bound to the per-tile override). The
+previous design exposed the global-default slider in every PI in
+"Plugin default" mode, which let the user accidentally adjust the
+plugin-wide value while they thought they were only configuring one
+tile.
+
+### Changed
+- Removed the global-default slider (`globalsetting="defaultSampleCount"`)
+  from every PI. The plugin-wide default now stays at the hard-coded
+  `SAMPLE_COUNT_DEFAULT` (30) unless we add a different UI for it.
+- Simplified each PI's visibility-toggle JS — it now only manages the
+  single per-tile slider.
+
+### Known limit
+- No UI to change the plugin-wide default value. If the v1.3 default
+  of 30 isn't right for a user's preference, they can switch a tile to
+  "This key only" and set their preferred value per tile, but other
+  tiles won't follow. A "Set as plugin default" button next to the
+  per-tile slider would close this gap if needed.
+
+### Tests
+- No code changes outside PI HTMLs; **183 tests unchanged**.
+
+---
+
+## v1.3.0 (2026-05-20)
+
+User-facing configurability for the graph's sample window. Previously
+hard-coded to "30 samples / 30 s of history"; now users pick the value
+themselves, either globally for the plugin or per-tile as an override.
+
+### Added
+- **Sample-count slider** in every PI: range 15–60, step 5
+  (= 15 s to 60 s of visible history at 1 Hz).
+- **Scope dropdown** per PI — "Plugin default (all keys)" vs "This key
+  only". Default is "Plugin default" so the slider's value applies
+  globally; switching to "This key only" treats the slider as an
+  override that shadows the global default just for this key.
+- **Dynamic buffer resize**: under the hood, each subscription's
+  history ring buffer is sized at `ceil(visible × 1.5)` so we keep
+  ~50% extra samples in reserve for any future "zoom out" feature.
+  Default 30 → buffer 45; max 60 → buffer 90; min 15 → buffer 23.
+
+### Changed
+- `History` ring buffer now has a `resize(newCapacity)` method that
+  **preserves the most recent samples that fit**. Shrinking drops
+  oldest; growing keeps everything in place and continues from there
+  on subsequent pushes. No "moment of no data" when the user tweaks
+  the slider.
+- `Hub.subscribe` takes a 4th optional argument `sampleCountOverride`;
+  the hub resolves the effective visible count via per-tile override
+  → plugin default → hard default precedence.
+- Renderer accepts a `visibleSamples` field on `RenderInput`; the
+  hard-coded `VISIBLE_SAMPLES = 30` constant is gone.
+- Plugin description (Stream Deck UI) gains a hint that the new
+  feature exists.
+
+### Technical
+- New `GlobalSettings.defaultSampleCount` (number, optional).
+- New per-action `Settings.sampleCount` (number, optional, used iff
+  `sampleScope === "tile"`).
+- New per-action `Settings.sampleScope` ("global" | "tile", optional;
+  treated as "global" when unset — back-compat for existing tiles).
+- New helper `extractSampleOverride(settings)` in `actions/toggle-view.ts`
+  — keeps the 12 action classes free of scope-check boilerplate.
+- New `clampSampleCount(n)` + `bufferSizeFor(visible)` utilities
+  exported from `hub.ts`.
+
+### Migration
+- Existing tiles inherit the plugin default 30, matching v1.2.x
+  behavior exactly. No visible change for any user who doesn't open a
+  PI.
+- Plugin global settings persist across restarts; per-tile overrides
+  persist per key as part of action settings.
+
+### Tests
+- 86 Swift + 97 TypeScript = **183 total**. New coverage:
+  `History.resize` (5 scenarios), `clampSampleCount` (5 scenarios),
+  `bufferSizeFor`, `extractSampleOverride`.
+
+---
+
 ## v1.2.3 (2026-05-20)
 
 Bug-fix release. Fixes a "ghost no-data" state that affected the CPU
@@ -484,7 +619,7 @@ Power profiles (W) — tuned against actual Intel Mac TDPs (laptops
 
 ---
 
-## Cumulative current state (post-v1.2.3)
+## Cumulative current state (post-v1.3.3)
 
 | | Count |
 |---|---|

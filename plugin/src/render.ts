@@ -32,6 +32,10 @@ export type RenderInput = {
     rawValue?: number | null;
     /** Profile (used by meter to derive per-segment colors). */
     profile?: MetricProfile;
+    /** Number of trailing samples to render in the sparkline. The hub
+     *  passes its current buffer here. Defaults to 30 when omitted (for
+     *  test inputs that don't care). */
+    visibleSamples?: number;
 };
 
 const W = 144;
@@ -48,12 +52,10 @@ const VALUE_BASELINE_Y = 56;
 const GRAPH_Y = 62;
 const GRAPH_H = H - GRAPH_Y;
 
-// Number of trailing samples to render in the sparkline. The hub keeps a
-// 45-sample buffer (45 s of history) but the graph displays only the most
-// recent 30. With the 144 px canvas, that yields ~5 px/sample — each tick
-// is a clearly distinct mark instead of a hairline. The leftover 15
-// samples stay in the buffer for any future "zoomed-out view" feature.
-const VISIBLE_SAMPLES = 30;
+// Default number of trailing samples to render when input.visibleSamples
+// is not provided (test-only path; the hub always passes its current
+// value as of v1.3).
+const DEFAULT_VISIBLE_SAMPLES = 30;
 
 /** Escape characters that have special meaning in XML attribute values. */
 function xmlEscape(s: string): string {
@@ -65,15 +67,16 @@ function xmlEscape(s: string): string {
 }
 
 /** Build the sparkline as one `<path>` per contiguous run of non-null samples.
- *  Renders only the most recent VISIBLE_SAMPLES (49) of whatever was passed
- *  in — the buffer may hold more (e.g. 60 s of history). */
+ *  Renders only the most recent `visibleSamples` of whatever was passed
+ *  in — the buffer may hold more (the reserve window for future zoom-out). */
 function buildSparkline(
     samples: (number | null)[],
     range: { min: number; max: number },
     color: string,
+    visibleSamples: number,
 ): string {
-    const visible = samples.length > VISIBLE_SAMPLES
-        ? samples.slice(-VISIBLE_SAMPLES)
+    const visible = samples.length > visibleSamples
+        ? samples.slice(-visibleSamples)
         : samples;
     const n = visible.length;
     if (n === 0) return "";
@@ -150,7 +153,12 @@ function renderWithGraph(input: RenderInput): string {
     const valueColor = input.noData ? NO_DATA_COLOR : COLORS[input.band];
     const graphColor = input.noData ? NO_DATA_COLOR : COLORS[input.band];
 
-    const sparkline = buildSparkline(input.samples, input.range, graphColor);
+    const sparkline = buildSparkline(
+        input.samples,
+        input.range,
+        graphColor,
+        input.visibleSamples ?? DEFAULT_VISIBLE_SAMPLES,
+    );
 
     // Header 26 px / weight 700 — matches value-mode header size for
     // visual consistency. Value 34 px / weight 700 — unchanged.

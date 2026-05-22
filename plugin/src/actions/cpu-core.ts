@@ -10,7 +10,7 @@ import streamDeck, {
 } from "@elgato/streamdeck";
 import type { JsonValue } from "@elgato/utils";
 import { hub, type ViewMode } from "../hub.js";
-import { handleKeyDown, handleKeyUp } from "./toggle-view.js";
+import { handleKeyDown, handleKeyUp, extractSampleOverride } from "./toggle-view.js";
 
 type Settings = {
     /** Selected core index from the Property Inspector.
@@ -21,6 +21,8 @@ type Settings = {
     tempUnit?: "C" | "F";
     /** Current view mode for this key. Toggled by key press. */
     viewMode?: ViewMode;
+    sampleCount?: number;
+    sampleScope?: "global" | "tile";
 };
 
 @action({ UUID: "dev.andreisudarikov.intel-mac-monitor.cpu-core" })
@@ -34,6 +36,7 @@ export class CPUCoreTempAction extends SingletonAction<Settings> {
             },
             { kind: "cpuCore", coreIndex: idx },
             ev.payload.settings.viewMode ?? "graph",
+        extractSampleOverride(ev.payload.settings),
         );
     }
 
@@ -50,6 +53,7 @@ export class CPUCoreTempAction extends SingletonAction<Settings> {
             },
             { kind: "cpuCore", coreIndex: idx },
             ev.payload.settings.viewMode ?? "graph",
+        extractSampleOverride(ev.payload.settings),
         );
         applyUnitFromSettings(ev.payload.settings);
     }

@@ -5,10 +5,37 @@ export class History {
     private buf: (number | null)[];
     private head: number = 0;
     private _length: number = 0;
+    private _capacity: number;
 
-    constructor(public readonly capacity: number) {
+    constructor(capacity: number) {
         if (capacity <= 0) throw new Error("History capacity must be positive");
+        this._capacity = capacity;
         this.buf = new Array(capacity).fill(null);
+    }
+
+    get capacity(): number {
+        return this._capacity;
+    }
+
+    /** Resize the ring buffer. Preserves the most recent samples that fit
+     *  in the new capacity. Shrinking drops oldest samples; growing keeps
+     *  all existing and leaves room for future samples. */
+    resize(newCapacity: number): void {
+        if (newCapacity <= 0) throw new Error("History capacity must be positive");
+        if (newCapacity === this._capacity) return;
+
+        // Materialize the current samples in chronological order, then
+        // truncate from the front (drop oldest) if shrinking past length.
+        const all = this.toArray();
+        const keep = all.length > newCapacity ? all.slice(all.length - newCapacity) : all;
+
+        this._capacity = newCapacity;
+        this.buf = new Array(newCapacity).fill(null);
+        this._length = keep.length;
+        this.head = keep.length % newCapacity;   // next write position
+        for (let i = 0; i < keep.length; i++) {
+            this.buf[i] = keep[i]!;
+        }
     }
 
     /** Append a sample. If at capacity, the oldest sample is dropped. */

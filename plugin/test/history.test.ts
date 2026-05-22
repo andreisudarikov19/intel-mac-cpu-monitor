@@ -80,6 +80,76 @@ describe("History ring buffer", () => {
         expect(h.toArray()).toEqual([99]);
     });
 
+    describe("resize", () => {
+        it("rejects non-positive capacity", () => {
+            const h = new History(5);
+            expect(() => h.resize(0)).toThrow();
+            expect(() => h.resize(-1)).toThrow();
+        });
+
+        it("is a no-op when called with the same capacity", () => {
+            const h = new History(5);
+            h.push(1);
+            h.push(2);
+            h.push(3);
+            h.resize(5);
+            expect(h.capacity).toBe(5);
+            expect(h.toArray()).toEqual([1, 2, 3]);
+        });
+
+        it("grows the buffer, preserving all existing samples", () => {
+            const h = new History(3);
+            h.push(10);
+            h.push(20);
+            h.push(30);
+            h.resize(6);
+            expect(h.capacity).toBe(6);
+            expect(h.length).toBe(3);
+            expect(h.toArray()).toEqual([10, 20, 30]);
+            // Future pushes fill out the extra room without rotating
+            h.push(40);
+            h.push(50);
+            h.push(60);
+            expect(h.toArray()).toEqual([10, 20, 30, 40, 50, 60]);
+            h.push(70);  // now at capacity, evicts oldest
+            expect(h.toArray()).toEqual([20, 30, 40, 50, 60, 70]);
+        });
+
+        it("shrinks the buffer, keeping only the most recent samples", () => {
+            const h = new History(6);
+            for (const v of [1, 2, 3, 4, 5, 6]) h.push(v);
+            h.resize(3);
+            expect(h.capacity).toBe(3);
+            expect(h.length).toBe(3);
+            expect(h.toArray()).toEqual([4, 5, 6]);
+            // Subsequent pushes continue the chronological order
+            h.push(7);
+            expect(h.toArray()).toEqual([5, 6, 7]);
+        });
+
+        it("handles resize when buffer holds fewer than new capacity", () => {
+            const h = new History(10);
+            h.push(1);
+            h.push(2);
+            h.resize(5);
+            expect(h.length).toBe(2);
+            expect(h.toArray()).toEqual([1, 2]);
+        });
+
+        it("resize works correctly after rotation has occurred", () => {
+            // Resize on a buffer that's already been rotated past capacity —
+            // checks that head/length bookkeeping is correct, not just on
+            // freshly-filled buffers.
+            const h = new History(3);
+            for (const v of [1, 2, 3, 4, 5]) h.push(v);  // buffer has [3, 4, 5]
+            h.resize(5);
+            expect(h.toArray()).toEqual([3, 4, 5]);
+            h.push(6);
+            h.push(7);
+            expect(h.toArray()).toEqual([3, 4, 5, 6, 7]);
+        });
+    });
+
     it("survives a heavy rotation pattern (regression for ring math)", () => {
         // Catch off-by-one errors in the modular arithmetic by pushing
         // many more than capacity and verifying the trailing window is
