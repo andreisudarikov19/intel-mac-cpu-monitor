@@ -4,6 +4,7 @@ import {
     tempBandFor,
     bandFor,
     fanBand,
+    fanProfileFor,
     cToF,
     COLORS,
     TEMP_RANGE,
@@ -41,30 +42,59 @@ describe("temperature bands", () => {
     });
 });
 
-describe("fan bands", () => {
-    it("classifies ≤30% max as cool", () => {
-        expect(fanBand(0, 6000)).toBe("cool");
-        expect(fanBand(1800, 6000)).toBe("cool");        // exactly 30%
+describe("fan bands (v1.5 — usable range)", () => {
+    // Reference iMac 27" fan: min 1200, max 2700 → usable 1500.
+    // Band cutoffs at 40 / 70 / 90 % of usable above min:
+    //   coolMax = 1200 + 600 = 1800
+    //   warmMax = 1200 + 1050 = 2250
+    //   hotMax  = 1200 + 1350 = 2550
+    it("idle (= min RPM) is cool — fixes v1.4 'yellow at idle' bug", () => {
+        expect(fanBand(1200, 1200, 2700)).toBe("cool");
     });
 
-    it("classifies 30%..70% as warm", () => {
-        expect(fanBand(1801, 6000)).toBe("warm");
-        expect(fanBand(4200, 6000)).toBe("warm");        // exactly 70%
+    it("≤ 40% above min is cool", () => {
+        expect(fanBand(1500, 1200, 2700)).toBe("cool");   // 20% above min
+        expect(fanBand(1800, 1200, 2700)).toBe("cool");   // exactly 40%
     });
 
-    it("classifies 70%..100% as hot", () => {
-        expect(fanBand(4201, 6000)).toBe("hot");
-        expect(fanBand(6000, 6000)).toBe("hot");
+    it("40%..70% above min is warm", () => {
+        expect(fanBand(1801, 1200, 2700)).toBe("warm");
+        expect(fanBand(2250, 1200, 2700)).toBe("warm");   // exactly 70%
     });
 
-    it("classifies >100% as critical (fan running above its declared max)", () => {
-        expect(fanBand(6001, 6000)).toBe("critical");
+    it("70%..90% above min is hot", () => {
+        expect(fanBand(2251, 1200, 2700)).toBe("hot");
+        expect(fanBand(2550, 1200, 2700)).toBe("hot");    // exactly 90%
     });
 
-    it("treats zero/negative max defensively", () => {
-        // A miscatalogued fan with max=0 must not blow up
-        expect(fanBand(1000, 0)).toBe("cool");
-        expect(fanBand(1000, -1)).toBe("cool");
+    it("> 90% above min is critical (fan close to or beyond rated max)", () => {
+        expect(fanBand(2551, 1200, 2700)).toBe("critical");
+        expect(fanBand(2700, 1200, 2700)).toBe("critical");
+        expect(fanBand(3000, 1200, 2700)).toBe("critical");    // beyond rated max
+    });
+
+    it("treats zero/negative usable range defensively", () => {
+        // A miscatalogued fan with min >= max must not blow up
+        expect(fanBand(1000, 1500, 1500)).toBe("cool");
+        expect(fanBand(1000, 2000, 1000)).toBe("cool");
+    });
+});
+
+describe("fanProfileFor (v1.5)", () => {
+    it("builds a per-fan profile with range = (min, max) and 40/70/90 thresholds", () => {
+        const p = fanProfileFor(1200, 2700);
+        expect(p.range.min).toBe(1200);
+        expect(p.range.max).toBe(2700);
+        expect(p.coolMax).toBeCloseTo(1800);
+        expect(p.warmMax).toBeCloseTo(2250);
+        expect(p.hotMax).toBeCloseTo(2550);
+    });
+
+    it("clamps degenerate min ≥ max to a 1-RPM usable range (no division by zero)", () => {
+        const p = fanProfileFor(2000, 2000);
+        expect(p.range.max).toBe(2000);
+        // coolMax just above min — degenerate but doesn't crash
+        expect(p.coolMax).toBeGreaterThan(p.range.min);
     });
 });
 

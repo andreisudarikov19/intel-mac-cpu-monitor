@@ -19,6 +19,7 @@ import { renderSVG, svgDataUri, type RenderInput } from "./render.js";
 import {
     cToF,
     fanBand,
+    fanProfileFor,
     TEMP_PROFILES,
     POWER_PROFILES,
     RAM_USAGE_PROFILE,
@@ -656,27 +657,30 @@ export class Hub {
     }
 
     private fanInput(label: string, latest: number | null, sub: Subscription, noData: boolean): RenderInput {
-        // Y-axis range: 0 to this fan's max RPM (or 6000 fallback).
-        let max = 6000;
+        // Look up this fan's reported min/max from the helper's ready
+        // event. min defaults to 0 (and max to 6000) if missing —
+        // graceful degradation but not the intended case.
+        let min = 0, max = 6000;
         if (this.ready && sub.kind.kind === "fan") {
             const fanIndex = sub.kind.fanIndex;
             const fan = this.ready.fans.find((x) => x.index === fanIndex);
-            if (fan && fan.max && fan.max > 0) max = fan.max;
+            if (fan) {
+                if (typeof fan.min === "number" && fan.min >= 0) min = fan.min;
+                if (typeof fan.max === "number" && fan.max > min) max = fan.max;
+            }
         }
+        // Profile bands relative to the *usable range* (min..max), not
+        // 0..max. This is the v1.5 calibration that fixes "yellow at
+        // idle" — fans never spin below their reported minimum, so the
+        // 0..min portion of the absolute scale was dead space.
+        const fanProfile: MetricProfile = fanProfileFor(min, max);
+
         let valueText = "";
         let band: Band = "cool";
         if (!noData && latest !== null) {
             valueText = `${Math.round(latest)}`;
-            band = fanBand(latest, max);
+            band = fanBand(latest, min, max);
         }
-        // Percentage-based profile so long-press meter view works for
-        // fans too — bands at 30 / 70 / 100 % of max RPM mirror fanBand.
-        const fanProfile: MetricProfile = {
-            range: { min: 0, max },
-            coolMax: max * 0.3,
-            warmMax: max * 0.7,
-            hotMax: max,
-        };
         return {
             label,
             valueText,

@@ -14,14 +14,30 @@ describe("v1.4 metrics — RAM usage profile", () => {
     });
 });
 
-describe("v1.4 metrics — Disk I/O profile", () => {
-    it("classifies common I/O rates into the right bands", () => {
+describe("v1.5 — Disk I/O profile (recalibrated for green visibility)", () => {
+    it("classifies common I/O rates with at least one cool band", () => {
         const p = DISK_IO_PROFILE;
         expect(bandFor(0, p)).toBe("cool");                    // idle
-        expect(bandFor(5_000_000, p)).toBe("cool");            // 5 MB/s = quiet writes
-        expect(bandFor(50_000_000, p)).toBe("warm");           // 50 MB/s = compile-class
-        expect(bandFor(500_000_000, p)).toBe("hot");           // 500 MB/s = heavy
-        expect(bandFor(2_000_000_000, p)).toBe("critical");    // 2 GB/s = peak NVMe
+        expect(bandFor(50_000_000, p)).toBe("cool");           // 50 MB/s = light
+        expect(bandFor(200_000_000, p)).toBe("cool");          // 200 MB/s = boundary
+        expect(bandFor(300_000_000, p)).toBe("warm");          // 300 MB/s = active
+        expect(bandFor(500_000_000, p)).toBe("warm");          // 500 MB/s = boundary
+        expect(bandFor(700_000_000, p)).toBe("hot");           // 700 MB/s = heavy
+        expect(bandFor(800_000_000, p)).toBe("hot");           // 800 MB/s = boundary
+        expect(bandFor(900_000_000, p)).toBe("critical");      // 900 MB/s = saturating
+        expect(bandFor(2_000_000_000, p)).toBe("critical");    // 2 GB/s = clamped, critical
+    });
+
+    it("range is 0–1 GB/s (covers common saturation; > 1 GB/s shows as critical/full)", () => {
+        expect(DISK_IO_PROFILE.range.min).toBe(0);
+        expect(DISK_IO_PROFILE.range.max).toBe(1_000_000_000);
+    });
+
+    it("segment 0's top edge (111 MB/s) lies inside the cool band (regression for v1.4 bug)", () => {
+        // Step = 1 GB / 9 ≈ 111 MB/s. If coolMax < 111 MB/s, segment 0
+        // would be classified as warm and the meter loses its green zone.
+        const step = DISK_IO_PROFILE.range.max / 9;
+        expect(bandFor(step, DISK_IO_PROFILE)).toBe("cool");
     });
 });
 

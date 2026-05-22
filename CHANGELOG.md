@@ -15,6 +15,74 @@ not the development journey. Append new versions to the top.
 
 ---
 
+## v1.5.0 (2026-05-20)
+
+Meter recalibration. Two known visual bugs in the v1.4 meters
+made them less informative than they should be — both stem from
+band thresholds being anchored to the wrong scale.
+
+### Fixed
+- **Fan meter showed yellow at idle.** Bands were 30/70/100 % of the
+  fan's *max* RPM, but Intel Mac fans idle well above 30 % of max
+  (the 27" iMac's fan idles at 1200 RPM, which is 44 % of its 2700
+  max — already in the "warm" band). At idle the meter showed 4 lit
+  segments, of which the upper 2 were yellow.
+
+  v1.5 anchors bands to the fan's **usable range** (`min..max`) so
+  idle reads as 0 % effort and the meter is empty when the fan is at
+  its floor. Spikes above the floor fill the meter from the bottom up.
+  Bands: ≤ 40 % cool, ≤ 70 % warm, ≤ 90 % hot, > 90 % critical.
+
+  Range start moved from 0 to `minRPM` — the 0..min portion of the
+  scale was dead space (fans never spin there) and is no longer
+  rendered.
+
+- **Disk I/O meter had no green zone.** Profile was `0–3 GB/s` with
+  `coolMax = 10 MB/s`. With 9 meter segments, the top of segment 0
+  was at 333 MB/s — way past the 10 MB/s cool boundary, so every
+  segment from 0 up was classified as hot or critical. The meter was
+  permanently orange-and-red even at idle.
+
+  v1.5 shrinks the range to **0–1 GB/s** (covers common saturation;
+  > 1 GB/s reads as "critical, full meter") and widens cool to
+  **≤ 200 MB/s**. New bands: cool ≤ 200 MB/s, warm ≤ 500 MB/s, hot
+  ≤ 800 MB/s, critical > 800 MB/s. Distribution across 9 segments
+  is now 1 cool / 3 warm / 3 hot / 2 critical — the meter shows
+  meaningful color at typical activity levels.
+
+  Trade-off accepted: peak NVMe transfers (e.g. 2–3 GB/s on PCIe 4.0)
+  clip at the top of the meter as "saturating". Worth it for the
+  visibility of common operations.
+
+### Reference data used for fan calibration
+| Mac | Fan min RPM | Fan max RPM |
+|---|---|---|
+| MacBook Pro 13" | ~1300 | ~6000 |
+| MacBook Pro 16" | ~1300 | ~5500 |
+| iMac 21.5" / Mac mini | ~1200 | ~2700 |
+| **iMac 27" (reference machine)** | **1200** | **2700** |
+| iMac Pro | ~1200 | ~2500 |
+| Mac Pro Intel | ~800 | ~2500 |
+
+### Technical
+- `fanBand(rpm, maxRPM)` → `fanBand(rpm, minRPM, maxRPM)`. Internal
+  function; no callers outside the plugin.
+- New `fanProfileFor(min, max)` exported from `thresholds.ts` —
+  builds a per-fan `MetricProfile` for the hub's `fanInput`. Range
+  starts at `min` so the meter and graph both anchor at the floor.
+- Hub's `fanInput` now extracts both `min` and `max` from the helper's
+  ready event and passes them through.
+- Pure-data change; no helper or wire-protocol changes.
+
+### Tests
+- 86 Swift + 127 TypeScript = **213 total** (up from 208). New
+  coverage: per-band assertions for the new fan classifier across
+  idle / quarter-load / midpoint / heavy / max ranges; explicit
+  regression for "segment 0 must be cool" on disk I/O; range-bounds
+  test on disk profile.
+
+---
+
 ## v1.4.1 (2026-05-20)
 
 UX polish on the v1.4.0 additions: uptime gets a left-aligned layout,
@@ -765,7 +833,7 @@ Power profiles (W) — tuned against actual Intel Mac TDPs (laptops
 
 ---
 
-## Cumulative current state (post-v1.4.1)
+## Cumulative current state (post-v1.5.0)
 
 | | Count |
 |---|---|
