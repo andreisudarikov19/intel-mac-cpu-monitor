@@ -58,6 +58,9 @@ struct ProtocolTests {
             thunderbolt: 48.0,
             cpuPower: 25.0,
             gpuPower: 18.5,
+            ramUsagePercent: nil,
+            diskReadBytesPerSec: nil,
+            diskWriteBytesPerSec: nil,
             fans: [FanReading(i: 0, rpm: 1200)]
         )
         let line = encodeOneLine(ev)!
@@ -87,6 +90,9 @@ struct ProtocolTests {
             ambient: nil, ram: nil, ssd: nil,
             chipset: nil, wifi: nil, thunderbolt: nil,
             cpuPower: nil, gpuPower: nil,
+            ramUsagePercent: nil,
+            diskReadBytesPerSec: nil,
+            diskWriteBytesPerSec: nil,
             fans: []
         )
         let line = encodeOneLine(ev)!
@@ -109,6 +115,9 @@ struct ProtocolTests {
             ambient: nil, ram: nil, ssd: nil,
             chipset: nil, wifi: nil, thunderbolt: nil,
             cpuPower: nil, gpuPower: nil,
+            ramUsagePercent: nil,
+            diskReadBytesPerSec: nil,
+            diskWriteBytesPerSec: nil,
             fans: [FanReading(i: 0, rpm: nil)]
         )
         let line = encodeOneLine(ev)!

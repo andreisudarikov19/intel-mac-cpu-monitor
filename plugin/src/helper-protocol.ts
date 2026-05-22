@@ -49,6 +49,13 @@ export type ReadingEvent = {
     thunderbolt?: number;
     cpuPower?: number;
     gpuPower?: number;
+    /** RAM usage % (Activity Monitor-style). 0–100. */
+    ramUsagePercent?: number;
+    /** Disk read rate, bytes/sec, summed across every block driver.
+     *  0 on the first tick (no baseline) and after sleep/wake reset. */
+    diskReadBytesPerSec?: number;
+    /** Disk write rate, bytes/sec. Same caveat. */
+    diskWriteBytesPerSec?: number;
     fans: FanReading[];
 };
 

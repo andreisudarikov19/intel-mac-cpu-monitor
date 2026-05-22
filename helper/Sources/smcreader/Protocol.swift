@@ -47,6 +47,15 @@ struct ReadingEvent: Encodable {
     let thunderbolt: Double?           // °C from chosen Thunderbolt sensor
     let cpuPower: Double?              // watts from chosen CPU power sensor
     let gpuPower: Double?              // watts from chosen GPU power sensor
+    /// RAM usage % (Activity Monitor-style: active + wired + compressed
+    /// over physical memory). Always populated.
+    let ramUsagePercent: Double?
+    /// Disk read rate (bytes per second) summed across every
+    /// IOBlockStorageDriver. First tick after helper start (or after a
+    /// sleep/wake reset) reports 0 because no baseline exists yet.
+    let diskReadBytesPerSec: Double?
+    /// Disk write rate (bytes per second), same caveat as read.
+    let diskWriteBytesPerSec: Double?
     let fans: [FanReading]
 }
 

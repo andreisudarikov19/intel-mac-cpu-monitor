@@ -14,6 +14,9 @@ import { WiFiTempAction } from "./actions/wifi.js";
 import { ThunderboltTempAction } from "./actions/thunderbolt.js";
 import { CPUPowerAction } from "./actions/cpu-power.js";
 import { GPUPowerAction } from "./actions/gpu-power.js";
+import { RAMUsageAction } from "./actions/ram-usage.js";
+import { DiskIOAction } from "./actions/disk-io.js";
+import { UptimeAction } from "./actions/uptime.js";
 import { hub, type GlobalSettings } from "./hub.js";
 
 streamDeck.logger.setLevel("trace");
@@ -30,6 +33,9 @@ streamDeck.actions.registerAction(new WiFiTempAction());
 streamDeck.actions.registerAction(new ThunderboltTempAction());
 streamDeck.actions.registerAction(new CPUPowerAction());
 streamDeck.actions.registerAction(new GPUPowerAction());
+streamDeck.actions.registerAction(new RAMUsageAction());
+streamDeck.actions.registerAction(new DiskIOAction());
+streamDeck.actions.registerAction(new UptimeAction());
 
 // Restore persistent global settings before the first reading lands.
 // Listens to both the initial fetch and live updates from any PI.

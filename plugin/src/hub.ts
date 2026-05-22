@@ -21,10 +21,13 @@ import {
     fanBand,
     TEMP_PROFILES,
     POWER_PROFILES,
+    RAM_USAGE_PROFILE,
+    DISK_IO_PROFILE,
     bandFor,
     type Band,
     type MetricProfile,
 } from "./thresholds.js";
+import * as os from "node:os";
 
 /** Bounds and default for the user-facing sample-count slider (v1.3+).
  *  Range chosen to avoid the v1.1-era "hair vs goosebumps" trap:
@@ -38,6 +41,36 @@ export const SAMPLE_COUNT_DEFAULT = 30;
  *  of recent-but-offscreen history in reserve for future "zoom out". */
 export function bufferSizeFor(visible: number): number {
     return Math.ceil(visible * 1.5);
+}
+
+/** Format a bytes/sec value with adaptive units for compact key display.
+ *  Threshold cutoffs match human intuition: under 1 MB/s use KB,
+ *  between 1 MB/s and 1 GB/s use MB, above use GB. Integer values
+ *  in KB / single decimal in MB / GB. */
+export function formatBytesPerSec(bps: number): string {
+    if (bps < 1_000_000) {
+        return `${Math.round(bps / 1024)} KB/s`;
+    }
+    if (bps < 1_000_000_000) {
+        return `${(bps / 1_000_000).toFixed(1)} MB/s`;
+    }
+    return `${(bps / 1_000_000_000).toFixed(1)} GB/s`;
+}
+
+/** Ultra-compact byte-rate formatter for dual-meter column footers
+ *  (each ≤ 52 px wide). Drops the "/s" and uses a single letter for
+ *  the unit. `12 MB/s` → `12M`, `1.5 GB/s` → `1.5G`, `512 KB/s` →
+ *  `512K`. Sub-KB values report as `0K`. */
+export function formatBytesPerSecCompact(bps: number): string {
+    if (bps < 1024) return "0K";
+    if (bps < 1_000_000) {
+        return `${Math.round(bps / 1024)}K`;
+    }
+    if (bps < 1_000_000_000) {
+        const mb = bps / 1_000_000;
+        return mb >= 10 ? `${Math.round(mb)}M` : `${mb.toFixed(1)}M`;
+    }
+    return `${(bps / 1_000_000_000).toFixed(1)}G`;
 }
 
 /** Clamp + step-snap a sample-count value to the slider's permitted set. */
@@ -83,12 +116,19 @@ type SubscriptionKind =
     | { kind: "thunderbolt" }
     | { kind: "cpuPower" }
     | { kind: "gpuPower" }
+    | { kind: "ramUsage" }
+    | { kind: "diskIO" }
+    | { kind: "uptime" }
     | { kind: "fan"; fanIndex: number };
 
 type Subscription = {
     subscriber: Subscriber;
     kind: SubscriptionKind;
     history: History;
+    /** Second history buffer for dual-stream metrics (currently only
+     *  disk I/O: history = read bytes/sec, historyB = write bytes/sec).
+     *  Resized in lockstep with `history` by `applyVisibleChange`. */
+    historyB: History | null;
     viewMode: ViewMode;
     /** Per-tile override. `undefined` means "follow plugin default". */
     sampleCountOverride: number | undefined;
@@ -97,6 +137,12 @@ type Subscription = {
      *  Cached here so we can detect changes and resize the buffer. */
     visible: number;
 };
+
+/** Returns true if a subscription kind needs a second history buffer
+ *  (i.e., is a dual-stream metric). Currently only diskIO. */
+function isDualStream(kind: SubscriptionKind): boolean {
+    return kind.kind === "diskIO";
+}
 
 export class Hub {
     private supervisor: HelperSupervisor | null = null;
@@ -167,11 +213,14 @@ export class Hub {
     }
 
     /** Resize a subscription's history buffer to match a new visible count.
-     *  Preserves the most recent samples that fit in the new buffer. */
+     *  Preserves the most recent samples that fit in the new buffer.
+     *  For dual-stream subscriptions, resizes both buffers together. */
     private applyVisibleChange(sub: Subscription, newVisible: number): void {
         if (newVisible === sub.visible) return;
         sub.visible = newVisible;
-        sub.history.resize(bufferSizeFor(newVisible));
+        const cap = bufferSizeFor(newVisible);
+        sub.history.resize(cap);
+        sub.historyB?.resize(cap);
     }
 
     getGlobalSettings(): GlobalSettings {
@@ -202,10 +251,12 @@ export class Hub {
             this.renderAndPush(existing).catch((e) => streamDeck.logger.error(String(e)));
             return;
         }
+        const cap = bufferSizeFor(visible);
         const sub: Subscription = {
             subscriber,
             kind,
-            history: new History(bufferSizeFor(visible)),
+            history: new History(cap),
+            historyB: isDualStream(kind) ? new History(cap) : null,
             viewMode,
             sampleCountOverride,
             visible,
@@ -267,8 +318,19 @@ export class Hub {
 
     private onReading(ev: ReadingEvent): void {
         for (const sub of this.subscriptions.values()) {
-            const value = this.extractMetric(sub.kind, ev);
-            sub.history.push(value);
+            if (sub.kind.kind === "diskIO") {
+                // Dual-stream: history holds read bytes/sec, historyB
+                // holds write bytes/sec.
+                const r = typeof ev.diskReadBytesPerSec === "number" && Number.isFinite(ev.diskReadBytesPerSec)
+                    ? ev.diskReadBytesPerSec : null;
+                const w = typeof ev.diskWriteBytesPerSec === "number" && Number.isFinite(ev.diskWriteBytesPerSec)
+                    ? ev.diskWriteBytesPerSec : null;
+                sub.history.push(r);
+                sub.historyB?.push(w);
+            } else {
+                const value = this.extractMetric(sub.kind, ev);
+                sub.history.push(value);
+            }
             this.renderAndPush(sub).catch((e) => streamDeck.logger.error(String(e)));
         }
     }
@@ -287,6 +349,7 @@ export class Hub {
         // Inject a gap into every history so the renderer shows "No data".
         for (const sub of this.subscriptions.values()) {
             sub.history.push(null);
+            sub.historyB?.push(null);
             this.renderAndPush(sub).catch((e) => streamDeck.logger.error(String(e)));
         }
     }
@@ -328,6 +391,26 @@ export class Hub {
                 return typeof ev.cpuPower === "number" && Number.isFinite(ev.cpuPower) ? ev.cpuPower : null;
             case "gpuPower":
                 return typeof ev.gpuPower === "number" && Number.isFinite(ev.gpuPower) ? ev.gpuPower : null;
+            case "ramUsage":
+                return typeof ev.ramUsagePercent === "number" && Number.isFinite(ev.ramUsagePercent)
+                    ? ev.ramUsagePercent : null;
+            case "diskIO": {
+                // Combined throughput = read + write bytes/sec.
+                const r = typeof ev.diskReadBytesPerSec === "number" && Number.isFinite(ev.diskReadBytesPerSec)
+                    ? ev.diskReadBytesPerSec : 0;
+                const w = typeof ev.diskWriteBytesPerSec === "number" && Number.isFinite(ev.diskWriteBytesPerSec)
+                    ? ev.diskWriteBytesPerSec : 0;
+                // Treat (0,0) as nodata only on the very first reading
+                // (helper sends 0 before it has a baseline). After that,
+                // an honest 0 is meaningful — "no disk activity".
+                if (r === 0 && w === 0 && ev.diskReadBytesPerSec === undefined) return null;
+                return r + w;
+            }
+            case "uptime":
+                // Not pulled from the helper event — Node knows uptime
+                // directly. Returning a constant non-null keeps the
+                // subscription "not no-data" so the slide renders.
+                return os.uptime();
             case "fan": {
                 const f = ev.fans.find(
                     (x) => x && typeof x === "object" && (x as { i?: unknown }).i === kind.fanIndex,
@@ -397,6 +480,12 @@ export class Hub {
                 return this.powerInput("CPU", latest, sub, noData, POWER_PROFILES.cpu);
             case "gpuPower":
                 return this.powerInput("GPU", latest, sub, noData, POWER_PROFILES.gpu);
+            case "ramUsage":
+                return this.ramUsageInput(latest, sub, noData);
+            case "diskIO":
+                return this.diskIOInput(latest, sub, noData);
+            case "uptime":
+                return this.uptimeInput(sub);
             case "fan": {
                 const label = (this.ready && this.ready.fans.length > 1)
                     ? `FAN${sub.kind.fanIndex + 1}`
@@ -467,6 +556,105 @@ export class Hub {
         };
     }
 
+    private ramUsageInput(latest: number | null, sub: Subscription, noData: boolean): RenderInput {
+        let valueText = "";
+        let band: Band = "cool";
+        if (!noData && latest !== null) {
+            valueText = `${Math.round(latest)}%`;
+            band = bandFor(latest, RAM_USAGE_PROFILE);
+        }
+        return {
+            label: "RAM",
+            valueText,
+            band,
+            noData,
+            samples: sub.history.toArray(),
+            range: RAM_USAGE_PROFILE.range,
+            viewMode: sub.viewMode,
+            rawValue: latest,
+            profile: RAM_USAGE_PROFILE,
+            visibleSamples: sub.visible,
+        };
+    }
+
+    private diskIOInput(_combinedLatest: number | null, sub: Subscription, noData: boolean): RenderInput {
+        // Dual-stream: history = read bytes/sec, historyB = write bytes/sec.
+        const read = sub.history.latest();
+        const write = sub.historyB?.latest() ?? null;
+
+        // "Latest" for band/noData decisions uses the BIGGER of the two —
+        // whichever stream is more active drives the color cue.
+        const peak = Math.max(read ?? 0, write ?? 0);
+        const band: Band = bandFor(peak, DISK_IO_PROFILE);
+
+        // Slide view: two lines with ↓ (read in) and ↑ (write out).
+        // formatBytesPerSecCompact keeps each line short enough to fit
+        // when the slide is left-aligned.
+        const slideLines = noData ? undefined : [
+            `↓ ${read != null ? formatBytesPerSec(read) : "—"}`,
+            `↑ ${write != null ? formatBytesPerSec(write) : "—"}`,
+        ];
+
+        // Meter view: compact unit-tag values under each column
+        // (full "12.0 MB/s" is too wide for a 52 px column footer).
+        const meterReadText = read != null ? formatBytesPerSecCompact(read) : "";
+        const meterWriteText = write != null ? formatBytesPerSecCompact(write) : "";
+
+        return {
+            label: "DISK",
+            // Graph view's single bottom text shows the combined sum so
+            // the per-tick header label remains glanceable. For dual-
+            // stream slide and meter, valueText / valueTextB are used
+            // separately below.
+            valueText: noData || read === null && write === null
+                ? ""
+                : sub.viewMode === "meter" ? meterReadText
+                : formatBytesPerSec((read ?? 0) + (write ?? 0)),
+            valueTextB: sub.viewMode === "meter" ? meterWriteText : undefined,
+            band,
+            noData,
+            samples: sub.history.toArray(),
+            samplesB: sub.historyB ? sub.historyB.toArray() : undefined,
+            range: DISK_IO_PROFILE.range,
+            viewMode: sub.viewMode,
+            rawValue: read,
+            rawValueB: write,
+            profile: DISK_IO_PROFILE,
+            visibleSamples: sub.visible,
+            slideLines,
+            streamBColor: "#3FBEE9",   // cold cyan — distinct from read's band color
+        };
+    }
+
+    private uptimeInput(sub: Subscription): RenderInput {
+        // Uptime is slide-only; build the 3-line breakdown directly.
+        // `os.uptime()` returns seconds since system boot.
+        const totalSec = Math.max(0, Math.floor(os.uptime()));
+        const weeks = Math.floor(totalSec / (7 * 86400));
+        const afterWeeks = totalSec - weeks * 7 * 86400;
+        const days = Math.floor(afterWeeks / 86400);
+        const afterDays = afterWeeks - days * 86400;
+        const hours = Math.floor(afterDays / 3600);
+        const plural = (n: number, w: string) => `${n} ${n === 1 ? w : w + "s"}`;
+        return {
+            label: "UPTIME",
+            valueText: "",
+            band: "cool",        // unused; slideAccent overrides
+            noData: false,
+            samples: [],
+            range: { min: 0, max: 1 },
+            viewMode: "value",   // locked to slide
+            rawValue: null,
+            visibleSamples: sub.visible,
+            slideLines: [
+                plural(weeks, "week"),
+                plural(days, "day"),
+                plural(hours, "hour"),
+            ],
+            slideAccent: "#8E8E93",     // macOS systemGray (dark) — neutral, off-band
+        };
+    }
+
     private fanInput(label: string, latest: number | null, sub: Subscription, noData: boolean): RenderInput {
         // Y-axis range: 0 to this fan's max RPM (or 6000 fallback).
         let max = 6000;
@@ -518,6 +706,9 @@ function subscriptionKindsEqual(a: SubscriptionKind, b: SubscriptionKind): boole
         case "thunderbolt":
         case "cpuPower":
         case "gpuPower":
+        case "ramUsage":
+        case "diskIO":
+        case "uptime":
             return true;
         case "cpuCore":
             return a.coreIndex === (b as { coreIndex: number }).coreIndex;
