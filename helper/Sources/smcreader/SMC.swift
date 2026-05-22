@@ -37,8 +37,31 @@ final class SMC: SMCReading {
     private var connection: io_connect_t = 0
 
     init() throws {
-        // kIOMasterPortDefault is deprecated as of macOS 12; passing 0 selects
-        // the default master port and is the documented contract.
+        try openConnection()
+    }
+
+    deinit {
+        if connection != 0 {
+            IOServiceClose(connection)
+        }
+    }
+
+    /// Close and reopen the AppleSMC IOKit connection. Called when the
+    /// process detects it was paused (sleep/wake transition, SIGSTOP,
+    /// etc.) — some SMC keys go stale through such transitions and only
+    /// return data after a fresh `IOServiceOpen`. Cheap to call (a few
+    /// kernel calls); safe to call repeatedly.
+    func reset() throws {
+        if connection != 0 {
+            IOServiceClose(connection)
+            connection = 0
+        }
+        try openConnection()
+    }
+
+    private func openConnection() throws {
+        // kIOMasterPortDefault is deprecated as of macOS 12; passing 0
+        // selects the default master port and is the documented contract.
         let service = IOServiceGetMatchingService(0, IOServiceMatching("AppleSMC"))
         guard service != 0 else { throw SMCError.noService }
         defer { IOObjectRelease(service) }
@@ -47,12 +70,6 @@ final class SMC: SMCReading {
         let kr = IOServiceOpen(service, mach_task_self_, 0, &conn)
         guard kr == kIOReturnSuccess else { throw SMCError.openFailed(kr) }
         self.connection = conn
-    }
-
-    deinit {
-        if connection != 0 {
-            IOServiceClose(connection)
-        }
     }
 
     func read(key: String) -> (bytes: SMCBytes, dataType: String)? {

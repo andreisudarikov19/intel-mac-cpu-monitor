@@ -102,7 +102,41 @@ timer.schedule(deadline: .now() + .milliseconds(1000), repeating: .seconds(1))
 let consecutiveFailuresThreshold = 10
 let failureCounter = FailureCounter()
 
+// Sleep/wake detection: timer fires every 1s on a healthy system. A gap
+// over 10s between consecutive ticks means the process was paused —
+// almost certainly a sleep/wake transition (or SIGSTOP / debugger
+// attach). The AppleSMC connection silently goes stale for some package
+// sensors through these transitions, so we recycle it.
+final class TickGapTracker {
+    private var lastTickAt: TimeInterval? = nil
+    /// Returns the elapsed gap iff it exceeded the threshold (otherwise nil).
+    /// Always records the current time as the new "last tick".
+    func markAndCheckLongGap(thresholdSeconds: Double) -> Double? {
+        let now = Date().timeIntervalSince1970
+        defer { lastTickAt = now }
+        guard let last = lastTickAt else { return nil }   // first tick: no gap
+        let gap = now - last
+        return gap > thresholdSeconds ? gap : nil
+    }
+}
+let gapTracker = TickGapTracker()
+let longGapThresholdSeconds = 10.0
+
 timer.setEventHandler { [smc, catalog] in
+    // Detect sleep/wake and recycle the SMC connection before reading.
+    // The reset call is cheap; if it fails, exit so the supervisor
+    // gives us a fresh process.
+    if let gap = gapTracker.markAndCheckLongGap(thresholdSeconds: longGapThresholdSeconds) {
+        do {
+            try smc.reset()
+            logDiag("smc: reset after \(Int(gap))s gap (likely sleep/wake)")
+        } catch {
+            logDiag("smc: reset failed (\(error)) — exiting for supervisor restart")
+            shutdown.signal()
+            return
+        }
+    }
+
     let ts = Int64(Date().timeIntervalSince1970)
 
     var cpu: [String: Double] = [:]
