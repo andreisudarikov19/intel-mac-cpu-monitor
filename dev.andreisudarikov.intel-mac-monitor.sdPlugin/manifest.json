@@ -2,7 +2,7 @@
   "Name": "Intel Mac Hardware Monitor",
   "Author": "Andrei Sudarikov",
   "Description": "Live thermal, fan, and power readouts on your Stream Deck for Intel Macs (T2 and pre-T2). Tap a key to switch the graph view to a slide; long-press to switch to a VU-meter view.",
-  "Version": "1.3.3.0",
+  "Version": "1.4.1.0",
   "UUID": "dev.andreisudarikov.intel-mac-monitor",
   "SDKVersion": 3,
   "Icon": "imgs/plugin/icon",
@@ -169,6 +169,45 @@
       "DisableCaching": true,
       "States": [
         { "Image": "imgs/actions/gpu-power/key", "TitleAlignment": "middle" }
+      ]
+    },
+    {
+      "Name": "RAM Usage",
+      "UUID": "dev.andreisudarikov.intel-mac-monitor.ram-usage",
+      "Icon": "imgs/actions/ram-usage/icon",
+      "Tooltip": "RAM usage % (Activity Monitor-style). Intel Mac only.",
+      "PropertyInspectorPath": "ui/ram-usage.html",
+      "Controllers": ["Keypad"],
+      "UserTitleEnabled": false,
+      "DisableCaching": true,
+      "States": [
+        { "Image": "imgs/actions/ram-usage/key", "TitleAlignment": "middle" }
+      ]
+    },
+    {
+      "Name": "Disk I/O",
+      "UUID": "dev.andreisudarikov.intel-mac-monitor.disk-io",
+      "Icon": "imgs/actions/disk-io/icon",
+      "Tooltip": "Combined disk read+write throughput in bytes/sec.",
+      "PropertyInspectorPath": "ui/disk-io.html",
+      "Controllers": ["Keypad"],
+      "UserTitleEnabled": false,
+      "DisableCaching": true,
+      "States": [
+        { "Image": "imgs/actions/disk-io/key", "TitleAlignment": "middle" }
+      ]
+    },
+    {
+      "Name": "Uptime",
+      "UUID": "dev.andreisudarikov.intel-mac-monitor.uptime",
+      "Icon": "imgs/actions/uptime/icon",
+      "Tooltip": "System uptime in weeks / days / hours since boot.",
+      "PropertyInspectorPath": "ui/uptime.html",
+      "Controllers": ["Keypad"],
+      "UserTitleEnabled": false,
+      "DisableCaching": true,
+      "States": [
+        { "Image": "imgs/actions/uptime/key", "TitleAlignment": "middle" }
       ]
     }
   ]

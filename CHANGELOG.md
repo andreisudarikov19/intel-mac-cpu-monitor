@@ -15,6 +15,152 @@ not the development journey. Append new versions to the top.
 
 ---
 
+## v1.4.1 (2026-05-20)
+
+UX polish on the v1.4.0 additions: uptime gets a left-aligned layout,
+and Disk I/O is now genuinely dual-stream (read + write rendered as
+separate visual elements in every view mode).
+
+### Changed
+- **Uptime slide is now left-aligned.** Header "UPTIME" and the three
+  duration lines all start at x=26 (text-anchor="start") for a
+  data-sheet look instead of a centered banner. By extension every
+  multi-line slide uses left-alignment — the next text-rich metric
+  (load average / battery state) will inherit the same treatment.
+
+### Added — Disk I/O dual-stream
+The Disk I/O action now tracks **read and write as independent streams**
+in every view mode:
+
+- **Graph view**: two sparklines drawn together. Read uses the band
+  color of the peak stream; write uses cyan `#3FBEE9` (the v1.1 "cold"
+  color) for visual contrast. The big value text shows combined
+  bytes/sec; the per-tick color tracks the more active stream.
+- **Slide view**: two left-aligned lines: `↓ 12.0 MB/s` (read in)
+  and `↑ 1.5 MB/s` (write out). Down-arrow = data flowing into
+  memory; up-arrow = data flowing out to disk.
+- **Meter view**: two columns side-by-side (each 52 px wide, 12 px
+  gap, 14 px outer margins). Both columns share the same band gradient
+  (bottom green → top red); each lights up independently based on its
+  own value. Compact footer under each column: `12M` (read) and `1.5M`
+  (write) using the new ultra-compact formatter that drops "/s" and
+  uses single-letter units (K/M/G).
+
+### Technical
+- **Subscription** type gains optional `historyB: History` for
+  two-stream metrics. Resized in lockstep with `history` by
+  `applyVisibleChange`.
+- **Hub** special-cases `diskIO` in `onReading`/`onStale`: read goes
+  to `history`, write to `historyB`. Other metrics unchanged.
+- **RenderInput** gains optional `samplesB`, `rawValueB`, `valueTextB`,
+  `streamBColor` for any future two-stream metric.
+- **renderMeter** refactored to loop over a list of column specs —
+  single-column path (1 entry) and dual-column path (2 entries) share
+  the same rendering code.
+- New `formatBytesPerSecCompact(bps)` utility for column footers
+  (`12M` vs full `12 MB/s`).
+
+### Tests
+- 86 Swift + 122 TypeScript = **208 total** (up from 199). New
+  coverage: compact byte formatter, dual-stream graph rendering
+  (both stream colors present), dual-meter column placement
+  (x=14 and x=78), dual-slide left-alignment regression test for
+  uptime.
+
+---
+
+## v1.4.0 (2026-05-20)
+
+Three new non-SMC metrics, plus a multi-line slide capability that
+generalizes the slide view for future text-rich actions.
+
+### Added — 3 new actions
+| Action | UUID suffix | Data source | View modes |
+|---|---|---|---|
+| **RAM Usage** | `.ram-usage` | `host_statistics64` (active + wired + compressed) | graph / slide / meter |
+| **Disk I/O** | `.disk-io` | IOKit `IOBlockStorageDriver` (sum of all drives, delta sampled) | graph / slide / meter |
+| **Uptime** | `.uptime` | Node `os.uptime()` | **slide only** (3-line custom layout) |
+
+### RAM Usage details
+- Formula matches Activity Monitor's "Memory Used":
+  `(active + wired + compressed) × pageSize / totalPhysical`.
+- Profile: range 0–100 %, bands at 50 / 75 / 90 (cool → critical).
+  Bands tuned so the visual hits "warm" when memory pressure starts to
+  matter and "critical" once macOS is actively compressing/swapping.
+- Value text: `47%`.
+
+### Disk I/O details
+- **Combined throughput** (read + write summed). Per-stream split would
+  use two separate actions; deferred.
+- Helper does per-tick **delta sampling** of cumulative byte counters
+  across every `IOBlockStorageDriver` instance. First tick after start
+  reports 0 (no baseline); subsequent ticks report bytes/sec.
+- Sleep/wake recovery: when the helper resets its SMC connection (see
+  v1.2.3), it also resets the disk-I/O baseline to avoid a single
+  huge spike on the first post-wake tick.
+- Profile: range 0–3 GB/s (covers PCIe 3.0 NVMe ceiling), bands at
+  10 MB/s / 100 MB/s / 1 GB/s.
+- Adaptive units in displayed text: `KB/s` below 1 MB/s, `MB/s` to
+  1 GB/s, `GB/s` above.
+
+### Uptime details
+- **Slide-only**: no graph, no meter. Tap and long-press are both
+  no-ops; gesture handlers do nothing.
+- Custom 3-line layout: `{W} weeks` / `{D} days` / `{H} hours`,
+  largest unit on top. Always shows three lines (zeros included)
+  for visual consistency across the day.
+- Frame color: macOS systemGray `#8E8E93` — off the band palette
+  so the eye reads it as "informational, not state-dependent".
+- Pluralization: `1 week` vs `2 weeks` (etc.) done properly.
+- No helper involvement — `os.uptime()` is available in pure Node.
+- No PI controls beyond an informational message.
+
+### Multi-line slide capability (generalization)
+- `RenderInput` gained two optional fields:
+  - `slideLines: string[]` — when set + viewMode === "value", render
+    these stacked vertically. Header is automatically pushed up and
+    smaller to make room.
+  - `slideAccent: string` — override the band color for the frame
+    stroke. Used by uptime's grey frame; available for any future
+    off-band slide.
+- Layout in multi-line mode: header y=40 fs=20; lines at y=72/96/120
+  fs=22 each, all in white (`TEXT_COLOR`).
+- Single-line slide behaviour (the v1.2 default) is unchanged.
+
+### Helper additions
+- New file `Sources/smcreader/SystemStats.swift` — non-SMC system
+  metrics. Two callables: `ramUsagePercent()` (via `host_statistics64`)
+  and `DiskIORate.tick()` (stateful, returns bytes/sec deltas across
+  every block storage driver).
+- New optional fields on `ReadingEvent`: `ramUsagePercent`,
+  `diskReadBytesPerSec`, `diskWriteBytesPerSec`.
+- Sleep/wake reset (`SMC.reset()` path) now also resets the disk-I/O
+  baseline so the first post-wake tick doesn't report a multi-hour
+  worth of writes as one second of bandwidth.
+
+### Plugin additions
+- `formatBytesPerSec(bps)` utility — adaptive KB/MB/GB formatting.
+- `RAM_USAGE_PROFILE`, `DISK_IO_PROFILE` in `thresholds.ts`.
+- 3 new `SubscriptionKind` variants: `ramUsage`, `diskIO`, `uptime`.
+- 3 new action classes with their PI HTMLs and icon SVGs.
+
+### Tests
+- 86 Swift + 113 TypeScript = **199 total** (up from 188). New
+  coverage: profile classification, adaptive byte formatter, multi-line
+  slide rendering, slide-accent override, hub subscription wiring.
+
+### Out of scope (deferred)
+- **Wi-Fi** additions (power draw doesn't exist as an SMC key; RSSI
+  has different banding semantics — punted for v1.5+).
+- **Process count / load average** — wasn't explicitly confirmed in
+  the v1.4 scope discussion. Easy add later.
+- **Apple Silicon** — the new non-SMC sources (host_statistics64,
+  IOBlockStorageDriver, os.uptime) all work on AS, but the helper
+  still refuses on AS at startup for consistency with the SMC-based
+  actions. Selective AS support is a v1.5 conversation.
+
+---
+
 ## v1.3.3 (2026-05-20)
 
 Bug-fix release. Two issues reported against v1.3.2:
@@ -619,7 +765,7 @@ Power profiles (W) — tuned against actual Intel Mac TDPs (laptops
 
 ---
 
-## Cumulative current state (post-v1.3.3)
+## Cumulative current state (post-v1.4.1)
 
 | | Count |
 |---|---|

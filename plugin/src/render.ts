@@ -36,6 +36,30 @@ export type RenderInput = {
      *  passes its current buffer here. Defaults to 30 when omitted (for
      *  test inputs that don't care). */
     visibleSamples?: number;
+    /** Multi-line slide content. When set + viewMode === "value", the
+     *  slide view stacks these lines vertically inside the frame
+     *  instead of rendering a single big value. Used for uptime and
+     *  any future "show three numbers" metric. */
+    slideLines?: string[];
+    /** Override the band color used for the slide frame + value text.
+     *  Used for off-band slides (uptime uses neutral grey). When
+     *  omitted, falls back to COLORS[band]. */
+    slideAccent?: string;
+    /** Dual-stream support (currently used by disk I/O). When set, the
+     *  graph view draws a second sparkline; the meter view draws a
+     *  second column; the slide view uses `slideLines` (already
+     *  multi-line capable).
+     *
+     *  Convention: `samples` / `rawValue` = primary stream (read);
+     *  `samplesB` / `rawValueB` = secondary stream (write). */
+    samplesB?: (number | null)[];
+    rawValueB?: number | null;
+    /** Formatted text for the secondary stream's value label (meter
+     *  column footer, slide line, etc.). */
+    valueTextB?: string;
+    /** Color for the secondary stream's line/fill/column. When omitted,
+     *  the renderer picks a sensible contrast color. */
+    streamBColor?: string;
 };
 
 const W = 144;
@@ -159,6 +183,17 @@ function renderWithGraph(input: RenderInput): string {
         graphColor,
         input.visibleSamples ?? DEFAULT_VISIBLE_SAMPLES,
     );
+    // Second sparkline drawn on top of the first when this is a
+    // dual-stream metric (e.g. disk I/O write). Uses a contrasting
+    // color so the two streams don't bleed together visually.
+    const sparklineB = input.samplesB
+        ? buildSparkline(
+            input.samplesB,
+            input.range,
+            input.streamBColor ?? COLORS.cold,   // cyan default
+            input.visibleSamples ?? DEFAULT_VISIBLE_SAMPLES,
+        )
+        : "";
 
     // Header 26 px / weight 700 — matches value-mode header size for
     // visual consistency. Value 34 px / weight 700 — unchanged.
@@ -172,6 +207,7 @@ function renderWithGraph(input: RenderInput): string {
                 `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="34" font-weight="700" ` +
                 `fill="${valueColor}">${xmlEscape(input.valueText)}</text>` +
             sparkline +
+            sparklineB +
         `</svg>`;
     return svg;
 }
@@ -185,33 +221,61 @@ function renderWithGraph(input: RenderInput): string {
  * indicator) but tinted orange; drop the value text.
  */
 function renderValueOnly(input: RenderInput): string {
-    const accent = input.noData ? NO_DATA_COLOR : COLORS[input.band];
+    // slideAccent overrides the band color — used by off-band slides
+    // (e.g. uptime with a neutral grey frame).
+    const accent = input.noData
+        ? NO_DATA_COLOR
+        : (input.slideAccent ?? COLORS[input.band]);
     const headerColor = input.noData ? NO_DATA_COLOR : TEXT_COLOR;
     const headerText = input.noData ? "No data" : input.label;
+    const multiline = !input.noData && input.slideLines && input.slideLines.length > 0;
 
     // Layout (144x144):
-    //   frame  x=9, y=9, 126x126, rx=14, stroke 7.5
-    //          → frame's corner curve is concentric with Stream Deck's key
-    //            bezel (measured visually at ~23 px radius). Both curves
-    //            share center (23, 23) so the frame parallels the bezel
-    //            arc, sitting 5.25 px inside it everywhere.
-    //   header baseline y=58, font-size 26  (caps ~y=36..58)
-    //   value  baseline y=104, font-size 32 (caps ~y=76..104)
-    const value = input.noData
-        ? ""
-        : `<text x="${W / 2}" y="104" text-anchor="middle" ` +
+    //   frame  x=9, y=9, 126x126, rx=14, stroke 7.5 — concentric with
+    //          Stream Deck's ~23 px bezel curve
+    //   single-line case:  header y=58 fs=26; value y=104 fs=32
+    //   multi-line case:   header y=40 fs=20; three lines y=72/96/120 fs=22
+
+    let valueBlock = "";
+    let headerY = 58;
+    let headerFontSize = 26;
+
+    if (multiline) {
+        // Header pushed up to make room for stacked lines below. All
+        // text is left-aligned at x=26 — looks more like a data sheet
+        // and less like a centered banner. (x=26 keeps text clear of
+        // the frame's inner stroke edge at ~12.75 with comfortable
+        // padding.)
+        headerY = 40;
+        headerFontSize = 20;
+        const LEFT_X = 26;
+        const lineYs = [72, 96, 120];
+        const lines = input.slideLines!;
+        valueBlock = lines.slice(0, lineYs.length).map((line, i) =>
+            `<text x="${LEFT_X}" y="${lineYs[i]}" text-anchor="start" ` +
+            `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="22" font-weight="700" ` +
+            `fill="${TEXT_COLOR}">${xmlEscape(line)}</text>`,
+        ).join("");
+    } else if (!input.noData) {
+        valueBlock = `<text x="${W / 2}" y="104" text-anchor="middle" ` +
               `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="32" font-weight="700" ` +
               `fill="${accent}">${xmlEscape(input.valueText)}</text>`;
+    }
+
+    // In multi-line mode every line is left-aligned (data-sheet feel);
+    // in single-value mode the header stays centered above the big number.
+    const headerX = multiline ? 26 : W / 2;
+    const headerAnchor = multiline ? "start" : "middle";
 
     const svg =
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">` +
             `<rect x="0" y="0" width="${W}" height="${H}" fill="${BG_COLOR}"/>` +
             `<rect x="9" y="9" width="126" height="126" rx="14" ` +
                 `fill="none" stroke="${accent}" stroke-width="7.5"/>` +
-            `<text x="${W / 2}" y="58" text-anchor="middle" ` +
-                `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="26" font-weight="700" ` +
+            `<text x="${headerX}" y="${headerY}" text-anchor="${headerAnchor}" ` +
+                `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="${headerFontSize}" font-weight="700" ` +
                 `fill="${headerColor}">${xmlEscape(headerText)}</text>` +
-            value +
+            valueBlock +
         `</svg>`;
     return svg;
 }
@@ -228,68 +292,83 @@ function renderValueOnly(input: RenderInput): string {
  * to graph view.
  */
 function renderMeter(input: RenderInput): string {
-    const SEGMENTS = 9;                     // chunky bars beat fine resolution
-    const GAP = 2;                          // px between segments
-    const COL_TOP = 32;                     // y where column begins
-    const COL_BOTTOM = 124;                 // y where column ends — leaves
-                                            // room for value text below
-    const COL_X = 14;                       // left edge — 14 px margin each side
-    const COL_W = 116;                      // 116 px wide ≈ 80 % of canvas
-    const COL_H = COL_BOTTOM - COL_TOP;     // 92 px
-    const SEG_H = (COL_H - (SEGMENTS - 1) * GAP) / SEGMENTS;  // ≈ 8.44 px each
+    const SEGMENTS = 9;
+    const GAP = 2;
+    const COL_TOP = 32;
+    const COL_BOTTOM = 124;
+    const COL_H = COL_BOTTOM - COL_TOP;
+    const SEG_H = (COL_H - (SEGMENTS - 1) * GAP) / SEGMENTS;
 
     const headerColor = input.noData ? NO_DATA_COLOR : TEXT_COLOR;
     const headerText = input.noData ? "No data" : input.label;
-    const valueColor = input.noData ? NO_DATA_COLOR : COLORS[input.band];
 
-    // Compute how many segments are lit. profile required for color band
-    // per segment; if missing (defensive), default to all-green segments.
-    let numLit = 0;
-    if (!input.noData && input.rawValue != null && input.rawValue >= input.range.min) {
-        const norm = (input.rawValue - input.range.min) / (input.range.max - input.range.min);
-        numLit = Math.max(0, Math.min(SEGMENTS, Math.round(norm * SEGMENTS)));
-    }
+    // Single or dual column? Dual when this is a two-stream metric
+    // (disk I/O read+write). Both columns share the same band gradient;
+    // they just light up independently.
+    const dual = input.rawValueB !== undefined || input.samplesB !== undefined;
+    const columns: { x: number; w: number; rawValue: number | null; valueText: string }[] = dual
+        ? [
+              // 14 px margin · 52 col · 12 px gap · 52 col · 14 px margin = 144
+              { x: 14, w: 52, rawValue: input.rawValue ?? null, valueText: input.valueText },
+              { x: 78, w: 52, rawValue: input.rawValueB ?? null, valueText: input.valueTextB ?? "" },
+          ]
+        : [{ x: 14, w: 116, rawValue: input.rawValue ?? null, valueText: input.valueText }];
 
-    // Per-segment color: classify each segment's TOP edge value with the
-    // band thresholds, so the color transitions happen at real boundaries.
     const profile = input.profile;
-    const segments: string[] = [];
-    for (let i = 0; i < SEGMENTS; i++) {
-        // Segment 0 = bottom; segment SEGMENTS-1 = top.
-        const y = COL_BOTTOM - (i + 1) * SEG_H - i * GAP;
-        let color: string;
-        if (profile) {
-            const segValue = input.range.min
-                + ((i + 1) / SEGMENTS) * (input.range.max - input.range.min);
-            color = COLORS[bandFor(segValue, profile)];
-        } else {
-            // Fallback to per-position banding without profile thresholds.
-            const pos = i / SEGMENTS;
-            const band: Band = pos < 0.5 ? "cool" : pos < 0.75 ? "warm" : pos < 0.92 ? "hot" : "critical";
-            color = COLORS[band];
+    const segmentRects: string[] = [];
+    const valueTexts: string[] = [];
+
+    for (const col of columns) {
+        // numLit for this specific column's value
+        let numLit = 0;
+        if (!input.noData && col.rawValue != null && col.rawValue >= input.range.min) {
+            const norm = (col.rawValue - input.range.min) / (input.range.max - input.range.min);
+            numLit = Math.max(0, Math.min(SEGMENTS, Math.round(norm * SEGMENTS)));
         }
-        const isLit = i < numLit;
-        const opacity = isLit ? "1" : "0.18";
-        segments.push(
-            `<rect x="${COL_X}" y="${y.toFixed(2)}" width="${COL_W}" height="${SEG_H.toFixed(2)}" ` +
-            `rx="2" fill="${color}" fill-opacity="${opacity}"/>`
-        );
+
+        // Per-segment color: classify each segment's top-edge value via
+        // the profile, so both columns share the same band gradient.
+        for (let i = 0; i < SEGMENTS; i++) {
+            const y = COL_BOTTOM - (i + 1) * SEG_H - i * GAP;
+            let color: string;
+            if (profile) {
+                const segValue = input.range.min
+                    + ((i + 1) / SEGMENTS) * (input.range.max - input.range.min);
+                color = COLORS[bandFor(segValue, profile)];
+            } else {
+                const pos = i / SEGMENTS;
+                const band: Band = pos < 0.5 ? "cool" : pos < 0.75 ? "warm" : pos < 0.92 ? "hot" : "critical";
+                color = COLORS[band];
+            }
+            const opacity = i < numLit ? "1" : "0.18";
+            segmentRects.push(
+                `<rect x="${col.x}" y="${y.toFixed(2)}" width="${col.w}" height="${SEG_H.toFixed(2)}" ` +
+                `rx="2" fill="${color}" fill-opacity="${opacity}"/>`,
+            );
+        }
+
+        // Value text below this column, colored by its own current band.
+        if (!input.noData && col.rawValue != null && col.valueText) {
+            const valColor = profile
+                ? COLORS[bandFor(col.rawValue, profile)]
+                : COLORS[input.band];
+            const textX = col.x + col.w / 2;
+            valueTexts.push(
+                `<text x="${textX}" y="140" text-anchor="middle" ` +
+                `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="14" font-weight="700" ` +
+                `fill="${valColor}">${xmlEscape(col.valueText)}</text>`,
+            );
+        }
     }
 
     const svg =
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">` +
             `<rect x="0" y="0" width="${W}" height="${H}" fill="${BG_COLOR}"/>` +
-            // Header centered at top
             `<text x="${W / 2}" y="22" text-anchor="middle" ` +
                 `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="20" font-weight="700" ` +
                 `fill="${headerColor}">${xmlEscape(headerText)}</text>` +
-            segments.join("") +
-            // Value text below the column. y=140 leaves a couple px of
-            // breathing room before the 144 px canvas edge for descenders.
-            (input.noData ? "" :
-                `<text x="${W / 2}" y="140" text-anchor="middle" ` +
-                `font-family="-apple-system,Helvetica Neue,Helvetica,Arial,sans-serif" font-size="14" font-weight="700" ` +
-                `fill="${valueColor}">${xmlEscape(input.valueText)}</text>`) +
+            segmentRects.join("") +
+            valueTexts.join("") +
         `</svg>`;
     return svg;
 }

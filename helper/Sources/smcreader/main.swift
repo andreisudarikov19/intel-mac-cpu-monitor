@@ -122,6 +122,10 @@ final class TickGapTracker {
 let gapTracker = TickGapTracker()
 let longGapThresholdSeconds = 10.0
 
+// Disk-I/O rate sampler: tracks previous cumulative counters across
+// ticks so we can report bytes/sec each second.
+let diskIORate = SystemStats.DiskIORate()
+
 timer.setEventHandler { [smc, catalog] in
     // Detect sleep/wake and recycle the SMC connection before reading.
     // The reset call is cheap; if it fails, exit so the supervisor
@@ -135,6 +139,10 @@ timer.setEventHandler { [smc, catalog] in
             shutdown.signal()
             return
         }
+        // The disk-I/O counter baseline is also stale after a long pause
+        // (cumulative counters didn't tick during sleep). Resetting
+        // avoids a single huge spike on the first post-wake sample.
+        diskIORate.resetBaseline()
     }
 
     let ts = Int64(Date().timeIntervalSince1970)
@@ -203,6 +211,12 @@ timer.setEventHandler { [smc, catalog] in
         FanReading(i: fan.index, rpm: CatalogProbe.readFanRPM(reader: smc, fan: fan))
     }
 
+    // Non-SMC sources: RAM usage % via host_statistics64, disk I/O rates
+    // via IOBlockStorageDriver delta sampling. Independent of the SMC
+    // catalog — these are emitted every tick.
+    let ramUsagePercent = SystemStats.ramUsagePercent()
+    let (readBps, writeBps) = diskIORate.tick()
+
     // Did anything return a value this tick?
     let anyTemp = cpuAvg != nil || cpuPackage != nil || gpu != nil
         || ambient != nil || ram != nil || ssd != nil
@@ -249,6 +263,9 @@ timer.setEventHandler { [smc, catalog] in
         thunderbolt: thunderbolt,
         cpuPower: cpuPower,
         gpuPower: gpuPower,
+        ramUsagePercent: ramUsagePercent,
+        diskReadBytesPerSec: readBps,
+        diskWriteBytesPerSec: writeBps,
         fans: fans
     ))
 }

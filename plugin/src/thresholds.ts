@@ -91,6 +91,38 @@ export const POWER_PROFILES = {
     gpu: { range: { min: 0, max: 150 }, coolMax: 25, warmMax: 70, hotMax: 130 },
 } as const satisfies Record<string, MetricProfile>;
 
+/** RAM usage profile. Activity Monitor's "Memory Used" is already
+ *  pre-computed by the helper to a 0–100% scale. Bands tuned for the
+ *  glanceable "is my Mac starting to swap?" question — cool below
+ *  50%, hot when we're approaching 90%. Above 90% macOS will be
+ *  actively compressing/swapping. */
+export const RAM_USAGE_PROFILE: MetricProfile = {
+    range: { min: 0, max: 100 },
+    coolMax: 50,
+    warmMax: 75,
+    hotMax: 90,
+};
+
+/** Disk I/O profile (combined read + write, bytes/sec).
+ *  Range tuned for modern Intel-Mac NVMe SSDs (PCIe 3.0 x4, ~3 GB/s
+ *  peak read). Bands:
+ *    cool ≤ 10 MB/s — quiet, periodic writes
+ *    warm ≤ 100 MB/s — active app I/O (compile, file copy)
+ *    hot ≤ 1 GB/s — heavy throughput (video edit, build cache fill)
+ *    critical > 1 GB/s — sustained max-speed transfers
+ *  Older SATA SSDs (~500 MB/s peak) will never reach the "critical"
+ *  band, which is honest.
+ *
+ *  Values are in BYTES per second so they match the helper's
+ *  per-tick sample directly. Display formatting (MB/s, GB/s) is
+ *  done in the hub. */
+export const DISK_IO_PROFILE: MetricProfile = {
+    range: { min: 0, max: 3_000_000_000 },     // 3 GB/s = upper PCIe NVMe ceiling
+    coolMax: 10_000_000,                       // 10 MB/s
+    warmMax: 100_000_000,                      // 100 MB/s
+    hotMax: 1_000_000_000,                     // 1 GB/s
+};
+
 /** Classify a numeric reading into a color band using a profile.
  *  Profiles without `coldMax` skip the cold check. */
 export function bandFor(value: number, profile: MetricProfile): Band {
