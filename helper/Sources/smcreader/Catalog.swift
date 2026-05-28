@@ -25,6 +25,30 @@ struct SensorEntry {
     let coreIndex: Int?      // populated for per-core CPU entries
 }
 
+extension SensorCatalog {
+    /// True if `self` is missing any sensor slot that `expected` had
+    /// populated — i.e. a sensor that worked at startup has dropped out of
+    /// this (re-probed) catalog. Drives the post-wake re-probe retry loop:
+    /// the helper keeps re-probing until every startup sensor is back (or
+    /// the retry budget is exhausted). Never reports sensors that were
+    /// absent at startup as "missing".
+    func isMissingSensorsFrom(_ expected: SensorCatalog) -> Bool {
+        if expected.cpuPackage != nil && cpuPackage == nil { return true }
+        if expected.gpu != nil && gpu == nil { return true }
+        if expected.ambient != nil && ambient == nil { return true }
+        if expected.ram != nil && ram == nil { return true }
+        if expected.ssd != nil && ssd == nil { return true }
+        if expected.chipset != nil && chipset == nil { return true }
+        if expected.wifi != nil && wifi == nil { return true }
+        if expected.thunderbolt != nil && thunderbolt == nil { return true }
+        if expected.cpuPower != nil && cpuPower == nil { return true }
+        if expected.gpuPower != nil && gpuPower == nil { return true }
+        if cpuCores.count < expected.cpuCores.count { return true }
+        if fans.count < expected.fans.count { return true }
+        return false
+    }
+}
+
 struct FanCatalogEntry {
     let index: Int
     let min: Int?

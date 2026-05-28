@@ -357,4 +357,74 @@ struct CatalogTests {
         #expect(rpm != nil)
         #expect(abs(rpm! - 1844) <= 1)
     }
+
+    // MARK: - Wake re-probe comparison (v1.5.1)
+
+    /// Build a representative "full" catalog: per-core CPU, GPU, RAM,
+    /// ambient, SSD, one fan.
+    private func fullFixtures() -> MockSMC {
+        let smc = MockSMC()
+        for i in 0...3 { smc.setTemp(key: "TC\(i)c", celsius: 50) }
+        smc.setTemp(key: "TG0D", celsius: 47)
+        smc.setTemp(key: "TM0P", celsius: 38)
+        smc.setTemp(key: "TA0P", celsius: 22)
+        smc.setTemp(key: "TH0F", celsius: 40)
+        smc.setRawByte(key: "FNum", b0: 1)
+        smc.setFltFan(key: "F0Mn", rpm: 1200)
+        smc.setFltFan(key: "F0Mx", rpm: 2700)
+        return smc
+    }
+
+    @Test func missingSensors_IdenticalCatalog_ReportsComplete() {
+        let cat = CatalogProbe.probe(reader: fullFixtures(), t2: true)
+        #expect(cat.isMissingSensorsFrom(cat) == false)
+    }
+
+    @Test func missingSensors_DroppedGPU_ReportsMissing() {
+        let expected = CatalogProbe.probe(reader: fullFixtures(), t2: true)
+        // Re-probe where GPU has gone stale (key returns nothing).
+        let degraded = fullFixtures()
+        degraded.fixtures["TG0D"] = nil
+        let current = CatalogProbe.probe(reader: degraded, t2: true)
+        #expect(current.gpu == nil)
+        #expect(current.isMissingSensorsFrom(expected) == true)
+    }
+
+    @Test func missingSensors_DroppedRAMAmbient_ReportsMissing() {
+        let expected = CatalogProbe.probe(reader: fullFixtures(), t2: true)
+        let degraded = fullFixtures()
+        degraded.fixtures["TM0P"] = nil   // RAM
+        degraded.fixtures["TA0P"] = nil   // ambient
+        let current = CatalogProbe.probe(reader: degraded, t2: true)
+        #expect(current.isMissingSensorsFrom(expected) == true)
+    }
+
+    @Test func missingSensors_FewerCores_ReportsMissing() {
+        let expected = CatalogProbe.probe(reader: fullFixtures(), t2: true)
+        let degraded = fullFixtures()
+        degraded.fixtures["TC3c"] = nil   // lost one core
+        let current = CatalogProbe.probe(reader: degraded, t2: true)
+        #expect(current.cpuCores.count == 3)
+        #expect(current.isMissingSensorsFrom(expected) == true)
+    }
+
+    @Test func missingSensors_ExtraSensors_NotReportedAsMissing() {
+        // A re-probe that finds MORE than startup (e.g. a sensor that was
+        // briefly absent at boot) is not "missing" anything.
+        let expected = CatalogProbe.probe(reader: fullFixtures(), t2: true)
+        let richer = fullFixtures()
+        richer.setTemp(key: "TW0P", celsius: 42)   // Wi-Fi appears
+        let current = CatalogProbe.probe(reader: richer, t2: true)
+        #expect(current.wifi?.key == "TW0P")
+        #expect(current.isMissingSensorsFrom(expected) == false)
+    }
+
+    @Test func missingSensors_SensorAbsentAtStartup_NotConsideredMissing() {
+        // If Wi-Fi was never present at startup, a re-probe without it is
+        // complete — we only chase sensors that actually worked before.
+        let expected = CatalogProbe.probe(reader: fullFixtures(), t2: true)  // no Wi-Fi
+        let current = CatalogProbe.probe(reader: fullFixtures(), t2: true)   // also no Wi-Fi
+        #expect(expected.wifi == nil)
+        #expect(current.isMissingSensorsFrom(expected) == false)
+    }
 }

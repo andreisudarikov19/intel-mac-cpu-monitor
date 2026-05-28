@@ -9,6 +9,30 @@ All notable changes to the Intel Mac Hardware Monitor plugin. Each entry describ
 
 ---
 
+## v1.5.1 (2026-05-28)
+
+Bug-fix release. The sleep/wake "No data" problem from v1.2.3 was not fully fixed — RAM temp, GPU temp, and ambient air temp still went persistently stale after waking from sleep. Root cause was deeper than v1.2.3 addressed.
+
+### Root cause
+- v1.2.3 recycled the SMC `io_connect_t` ~1 s after wake but **kept the same catalog** — so the helper stayed bound to the exact sensor keys (`TG0D`, `TM0P`, `TA0P`) that had gone stale through sleep. A fresh process (manual Stream Deck restart) recovers because it **re-runs the catalog probe**, reading every candidate key and binding onto whichever works. That re-probe — not the connection reset — is the real fix.
+- The reset also likely fired too early: package/proximity sensors need a moment to re-initialize after wake.
+- The `failureCounter` only forces a respawn on **total** read failure. Partial staleness (3 sensors nil, CPU cores + fans fine) was invisible to it, so the bad state persisted indefinitely.
+
+### Fixed
+- **On wake, re-run the full catalog probe** (not just reset the connection). Sequence: detect the >10 s tick gap → keep reading + emitting whatever still works (so the supervisor's 5 s stale-watch stays satisfied) → after a 5 s settle, reset the connection AND re-probe → emit a fresh `ready` event. This reproduces the known-good fresh-process recovery without a process restart.
+- **Bounded retry**: if the re-probe still misses a sensor that existed at startup, retry the reset + re-probe (up to 4 more times, 5 s apart). Self-healing regardless of how long a given Mac's SMC takes to bring sensors back.
+
+### Technical
+- `main.swift`: `catalog` is now `var` and reassigned by the wake re-probe. Extracted `makeReadyEvent(_:)` (used at startup and after each re-probe). Snapshots the startup catalog as `expectedCatalog` to drive the retry decision.
+- `SensorCatalog.isMissingSensorsFrom(_:)` — new extension in `Catalog.swift` (testable): true if any sensor slot populated at startup is absent in a re-probed catalog. Never flags sensors that were absent at startup.
+- The wake path keeps the disk-I/O baseline reset from v1.4.0.
+
+### Testing notes
+- The recovery **mechanism** is verified: a SIGSTOP/SIGCONT pause (which produces the same >10 s tick gap as sleep) triggers the wake detection, settle, reset, re-probe, and fresh `ready` emission. However SIGSTOP does not make the SMC sensors actually go stale — only a real sleep/wake cycle does — so final confirmation that the staleness is *resolved* requires testing on hardware across a real sleep.
+- 92 Swift + 127 TypeScript = **219 total** (up from 213). New: 6 `isMissingSensorsFrom` comparison tests (identical / dropped GPU / dropped RAM+ambient / fewer cores / extra sensors / sensor-absent-at-startup).
+
+---
+
 ## v1.5.0 (2026-05-20)
 
 Meter recalibration. Two known visual bugs in the v1.4 meters made them less informative than they should be — both stem from band thresholds being anchored to the wrong scale.
@@ -523,18 +547,17 @@ Power profiles (W) — tuned against actual Intel Mac TDPs (laptops 15–45 W, M
 
 ---
 
-## Cumulative current state (post-v1.5.0)
+## Cumulative current state (post-v1.5.1)
 
 | | Count |
 |---|---|
-| Total actions in plugin | **12** |
-| View modes per action | **3** (graph / slide / meter) |
-| Distinct sensor profiles | **10** (8 temperature + 2 power) |
+| Total actions in plugin | **15** |
+| View modes per action | **3** (graph / slide / meter); Uptime is slide-only |
+| Distinct metric profiles | **12** (8 temperature + 2 power + RAM% + disk I/O) + per-fan dynamic |
 | Color bands | **5** (cold / cool / warm / hot / critical) |
-| Total tests | **167** (86 Swift + 81 TS) |
+| Total tests | **219** (92 Swift + 127 TS) |
 | Helper sample rate | 1 Hz |
-| History buffer | 45 samples |
-| Visible graph window | 30 samples |
+| Visible graph window | user-configurable 15–60 samples (default 30); buffer = ceil(visible × 1.5) |
 | Stream Deck min version | 6.9 |
 | macOS min version | 13 |
 

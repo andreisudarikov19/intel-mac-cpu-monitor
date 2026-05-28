@@ -43,7 +43,13 @@ do {
 
 // 3. Probe catalogue
 let t2 = Device.isT2
-let catalog = CatalogProbe.probe(reader: smc, t2: t2)
+// `catalog` is mutable: after a sleep/wake transition we re-run the probe
+// in place (see the timer handler's wake-recovery block) and reassign it.
+var catalog = CatalogProbe.probe(reader: smc, t2: t2)
+// Snapshot of the startup probe — the set of sensors we *expect* to be
+// present. Used after a wake re-probe to decide whether to keep retrying
+// (some sensors take longer than others to come back online).
+let expectedCatalog = catalog
 
 // 3a. Power-probe diagnostic dump. Walks every known power SMC key and
 // reports key + dataType + decoded value on stderr. Stream Deck captures
@@ -71,24 +77,32 @@ for key in Sensors.allKnownPowerKeysForDiagnostics {
     }
 }
 logDiag("=== end power-probe ===")
-emit(ReadyEvent(
-    arch: "x86_64",
-    t2: catalog.t2,
-    cpuCores: catalog.cpuCores.map {
-        CPUCoreInfo(index: $0.coreIndex ?? -1, key: $0.key)
-    },
-    cpuPackageKey: catalog.cpuPackage?.key,
-    gpuSensor: catalog.gpu?.key,
-    ambientSensor: catalog.ambient?.key,
-    ramSensor: catalog.ram?.key,
-    ssdSensor: catalog.ssd?.key,
-    chipsetSensor: catalog.chipset?.key,
-    wifiSensor: catalog.wifi?.key,
-    thunderboltSensor: catalog.thunderbolt?.key,
-    cpuPowerSensor: catalog.cpuPower?.key,
-    gpuPowerSensor: catalog.gpuPower?.key,
-    fans: catalog.fans.map { FanInfo(index: $0.index, min: $0.min, max: $0.max) }
-))
+
+// Build a ReadyEvent from a catalog. Called at startup and again after
+// every successful wake re-probe so the plugin rebuilds its view of which
+// sensors exist (a re-probe may resolve a sensor onto a different SMC key).
+func makeReadyEvent(_ catalog: SensorCatalog) -> ReadyEvent {
+    return ReadyEvent(
+        arch: "x86_64",
+        t2: catalog.t2,
+        cpuCores: catalog.cpuCores.map {
+            CPUCoreInfo(index: $0.coreIndex ?? -1, key: $0.key)
+        },
+        cpuPackageKey: catalog.cpuPackage?.key,
+        gpuSensor: catalog.gpu?.key,
+        ambientSensor: catalog.ambient?.key,
+        ramSensor: catalog.ram?.key,
+        ssdSensor: catalog.ssd?.key,
+        chipsetSensor: catalog.chipset?.key,
+        wifiSensor: catalog.wifi?.key,
+        thunderboltSensor: catalog.thunderbolt?.key,
+        cpuPowerSensor: catalog.cpuPower?.key,
+        gpuPowerSensor: catalog.gpuPower?.key,
+        fans: catalog.fans.map { FanInfo(index: $0.index, min: $0.min, max: $0.max) }
+    )
+}
+
+emit(makeReadyEvent(catalog))
 
 // 4. Periodic readings.
 let shutdown = DispatchSemaphore(value: 0)
@@ -122,30 +136,69 @@ final class TickGapTracker {
 let gapTracker = TickGapTracker()
 let longGapThresholdSeconds = 10.0
 
+// Wake recovery (v1.5.1). v1.2.3 reset the connection ~1s after wake but
+// kept the same catalog — so it stayed bound to the exact sensor keys that
+// had gone stale (RAM/GPU/ambient package sensors), and never recovered
+// them. The fresh-process path (manual restart) works because it RE-PROBES.
+// So on wake we now:
+//   1. note the wake, but keep reading+emitting the sensors that still work
+//      (CPU cores, fans) so the supervisor's stale-watch stays satisfied;
+//   2. after a settle delay (SMC needs time to re-init package sensors),
+//      reset the connection AND re-run the full catalog probe, then emit a
+//      fresh ready event — exactly what a fresh process does;
+//   3. if the re-probe still misses a sensor that existed at startup, retry
+//      the whole thing a few more times (the SMC may need longer than one
+//      settle period). Self-healing regardless of how long recovery takes.
+var wakeReprobeDeadline: TimeInterval? = nil
+var wakeReprobeRetriesLeft = 0
+let wakeSettleSeconds = 5.0
+let wakeReprobeMaxRetries = 4
+
 // Disk-I/O rate sampler: tracks previous cumulative counters across
 // ticks so we can report bytes/sec each second.
 let diskIORate = SystemStats.DiskIORate()
 
-timer.setEventHandler { [smc, catalog] in
-    // Detect sleep/wake and recycle the SMC connection before reading.
-    // The reset call is cheap; if it fails, exit so the supervisor
-    // gives us a fresh process.
+timer.setEventHandler { [smc] in
+    let nowWall = Date().timeIntervalSince1970
+
+    // Wake detection: a gap over the threshold between consecutive ticks
+    // means the process was paused (sleep/wake, SIGSTOP, debugger). Schedule
+    // a re-probe after a settle delay; the disk-I/O baseline is stale too.
+    // We deliberately DON'T reset/re-probe immediately — we fall through and
+    // keep emitting whatever still reads, so the supervisor's stale-watch is
+    // satisfied while the SMC stabilizes.
     if let gap = gapTracker.markAndCheckLongGap(thresholdSeconds: longGapThresholdSeconds) {
+        logDiag("wake detected (gap \(Int(gap))s) — re-probe in \(Int(wakeSettleSeconds))s")
+        wakeReprobeDeadline = nowWall + wakeSettleSeconds
+        wakeReprobeRetriesLeft = wakeReprobeMaxRetries
+        diskIORate.resetBaseline()
+    }
+
+    // Settle elapsed → reset the connection and re-run the full catalog
+    // probe (the fresh-process recovery). Retry if sensors are still missing.
+    if let deadline = wakeReprobeDeadline, nowWall >= deadline {
         do {
             try smc.reset()
-            logDiag("smc: reset after \(Int(gap))s gap (likely sleep/wake)")
         } catch {
             logDiag("smc: reset failed (\(error)) — exiting for supervisor restart")
             shutdown.signal()
             return
         }
-        // The disk-I/O counter baseline is also stale after a long pause
-        // (cumulative counters didn't tick during sleep). Resetting
-        // avoids a single huge spike on the first post-wake sample.
+        catalog = CatalogProbe.probe(reader: smc, t2: t2)
+        emit(makeReadyEvent(catalog))
         diskIORate.resetBaseline()
+        logDiag("wake re-probe: cores=\(catalog.cpuCores.count) gpu=\(catalog.gpu?.key ?? "none") ram=\(catalog.ram?.key ?? "none") air=\(catalog.ambient?.key ?? "none") ssd=\(catalog.ssd?.key ?? "none")")
+
+        if catalog.isMissingSensorsFrom(expectedCatalog) && wakeReprobeRetriesLeft > 0 {
+            wakeReprobeRetriesLeft -= 1
+            wakeReprobeDeadline = nowWall + wakeSettleSeconds
+            logDiag("wake re-probe still missing sensors — \(wakeReprobeRetriesLeft) retries left")
+        } else {
+            wakeReprobeDeadline = nil
+        }
     }
 
-    let ts = Int64(Date().timeIntervalSince1970)
+    let ts = Int64(nowWall)
 
     var cpu: [String: Double] = [:]
     for entry in catalog.cpuCores {
