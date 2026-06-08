@@ -9,6 +9,33 @@ All notable changes to the Intel Mac Hardware Monitor plugin. Each entry describ
 
 ---
 
+## v1.5.2 (2026-06-08)
+
+Bug-fix release. Real-hardware sleep/wake testing confirmed that v1.5.1's in-process recovery (recycle `io_connect_t` + re-probe catalog after a tick-gap heuristic) still left RAM temp, GPU temp, and ambient air temp persistently "No data" after waking from sleep. Replaces the heuristic with the canonical IOKit power-management notification and switches recovery from in-process reset to a clean helper respawn — the path that the manual-restart workaround proved actually works. Also adds an independent helper-stderr log file because Stream Deck's own plugin log never surfaced our recovery-diagnostic lines.
+
+### Root cause (revised from v1.5.1)
+- v1.5.1's catalog re-probe ran ~5–25 s after wake, gated by a tick-gap heuristic. On the reference iMac 27" 10-core, the package SMC keys (`TG0D`, `TM0P`, `TA0P`) do not come back within that window — they need longer. The retry budget (4 × 5 s) expired before they recovered, and the helper then stayed bound to a catalog without those entries until restart.
+- A fresh helper process (manual Stream Deck restart) recovers reliably because by the time the user notices and restarts, the SMC has finished re-initialising on its own. The fix is to *trigger a fresh process at the right moment*, not to reset in place.
+
+### Fixed
+- **IOKit-driven wake recovery.** New `PowerNotifier` (`Sources/smcreader/PowerNotifier.swift`) calls `IORegisterForSystemPower` on a dedicated CFRunLoop thread. On `kIOMessageSystemHasPoweredOn` it signals the helper to exit cleanly; the plugin's existing supervisor respawns with a fresh `io_connect_t` and a fresh catalog probe. Sleep messages (`kIOMessageCanSystemSleep` / `kIOMessageSystemWillSleep`) are immediately acked via `IOAllowPowerChange` so we never block the system going to sleep.
+- **Helper-stderr mirror log.** The supervisor now also appends raw helper stderr to `<sdPlugin>/logs/helper.log` (rotates once at 5 MB to `.1`). Stream Deck's main log only contains TRACE-Connection traffic, so the v1.5.1 `wake detected` / `wake re-probe` lines were invisible to us when diagnosing. The mirror file survives plugin restarts and is the source of truth for what the helper saw on every spawn.
+
+### Removed
+- `SMC.reset()`, `TickGapTracker`, `expectedCatalog`, and the wake re-probe retry loop in `main.swift` — all superseded by `PowerNotifier` + supervisor-driven respawn.
+- `SensorCatalog.isMissingSensorsFrom(_:)` — only consumer was the v1.5.1 retry loop; gone with it. 6 associated tests removed.
+
+### Technical
+- `main.swift`: `catalog` is back to `let` (no in-process mutation); timer body only emits readings.
+- `helper-supervisor.ts`: new private `openStderrLog()` / `closeStderrLog()`. Log path defaults to `dirname(binary)/../../logs/helper.log`, overridable via `stderrLogPath`. Failures (disk full, perms) silently disable the mirror — diagnostics aren't worth crashing the plugin over.
+- IOKit power-message constants (`kIOMessage*`) are not bridged into the Swift IOKit overlay; declared locally with stable ABI values (`0xE0000270` / `…0x280` / `…0x300`).
+
+### Testing notes
+- The IOKit wake path can't be exercised without a real sleep/wake cycle. The respawn path itself is covered by the existing supervisor tests (which exercise child exits and verify the restart counter resets on a healthy spawn).
+- 86 Swift + 127 TypeScript = **213 total** (down from 219 with the 6 removed comparison tests).
+
+---
+
 ## v1.5.1 (2026-05-28)
 
 Bug-fix release. The sleep/wake "No data" problem from v1.2.3 was not fully fixed — RAM temp, GPU temp, and ambient air temp still went persistently stale after waking from sleep. Root cause was deeper than v1.2.3 addressed.

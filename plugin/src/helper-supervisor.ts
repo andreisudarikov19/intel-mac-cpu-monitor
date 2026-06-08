@@ -12,6 +12,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createWriteStream, mkdirSync, renameSync, statSync, type WriteStream } from "node:fs";
 import {
     isHelperEvent,
     type HelperEvent,
@@ -48,6 +49,14 @@ export type SupervisorOptions = {
     backoffBaseMs?: number;
     /** Backoff cap (ms). Default 30000. */
     backoffMaxMs?: number;
+    /** Mirror the helper's stderr to this file (append mode). Stream Deck's
+     *  own plugin log doesn't surface our streamDeck.logger.error lines, so
+     *  we keep an independent file we control. Default: derived from
+     *  binaryPath as <sdPlugin>/logs/helper.log. */
+    stderrLogPath?: string;
+    /** Rotate the stderr log when it grows past this many bytes
+     *  (single rotation, previous content moved to <path>.1). Default 5 MB. */
+    stderrLogMaxBytes?: number;
 };
 
 export class HelperSupervisor {
@@ -60,6 +69,8 @@ export class HelperSupervisor {
     private unsupported = false;
     /** True once we've seen the first ready/reading for the current spawn. */
     private seenFirstEvent = false;
+    /** Append stream to the helper-stderr mirror file; one per spawn. */
+    private stderrLog: WriteStream | null = null;
 
     constructor(
         private readonly opts: SupervisorOptions,
@@ -95,6 +106,7 @@ export class HelperSupervisor {
         if (this.stopped) return;
         this.seenFirstEvent = false;
         this.unsupported = false;
+        this.openStderrLog();
 
         try {
             this.child = spawn(this.opts.binaryPath, [], {
@@ -120,8 +132,11 @@ export class HelperSupervisor {
         this.rl = createInterface({ input: child.stdout });
         this.rl.on("line", (line) => this.onLine(line));
 
-        // Capture stderr as plain text for diagnostics. We don't act on it.
+        // Capture stderr: mirror raw bytes to our file (so wake/recovery
+        // diagnostics survive across plugin restarts) AND forward to the
+        // SDK logger for live debugging.
         child.stderr.on("data", (chunk: Buffer) => {
+            if (this.stderrLog) this.stderrLog.write(chunk);
             const text = chunk.toString("utf8").trim();
             if (text.length > 0) {
                 this.cb.onError(`smcreader stderr: ${text}`);
@@ -134,6 +149,7 @@ export class HelperSupervisor {
                 clearTimeout(this.staleTimer);
                 this.staleTimer = null;
             }
+            this.closeStderrLog();
             // Apple Silicon path: helper said "unsupported" and exited 0.
             // Do not restart — there is no way to make it work.
             if (this.unsupported) return;
@@ -207,6 +223,40 @@ export class HelperSupervisor {
         }, after);
     }
 
+    private openStderrLog(): void {
+        const path = this.opts.stderrLogPath ?? defaultHelperStderrLogPath(this.opts.binaryPath);
+        const maxBytes = this.opts.stderrLogMaxBytes ?? 5 * 1024 * 1024;
+        try {
+            mkdirSync(dirname(path), { recursive: true });
+            try {
+                const st = statSync(path);
+                if (st.size > maxBytes) {
+                    renameSync(path, `${path}.1`);
+                }
+            } catch {
+                // File doesn't exist yet; nothing to rotate.
+            }
+            const stream = createWriteStream(path, { flags: "a" });
+            stream.on("error", () => {
+                // Disk full, permissions, etc. — don't crash the plugin
+                // over a diagnostic log. Drop the stream so subsequent
+                // writes are no-ops.
+                this.stderrLog = null;
+            });
+            this.stderrLog = stream;
+            stream.write(`\n--- helper spawn @ ${new Date().toISOString()} ---\n`);
+        } catch {
+            this.stderrLog = null;
+        }
+    }
+
+    private closeStderrLog(): void {
+        if (this.stderrLog) {
+            try { this.stderrLog.end(); } catch { /* ignore */ }
+            this.stderrLog = null;
+        }
+    }
+
     private scheduleRestart(): void {
         if (this.stopped) return;
         const base = this.opts.backoffBaseMs ?? 1000;
@@ -229,4 +279,11 @@ export class HelperSupervisor {
 export function defaultHelperPath(): string {
     const here = dirname(fileURLToPath(import.meta.url));
     return resolve(here, "mac", "smcreader");
+}
+
+/** Default location for the helper-stderr mirror file:
+ *  `<sdPlugin>/logs/helper.log`. */
+export function defaultHelperStderrLogPath(binaryPath: string): string {
+    // binaryPath: <sdPlugin>/bin/mac/smcreader → <sdPlugin>/logs/helper.log
+    return resolve(dirname(binaryPath), "..", "..", "logs", "helper.log");
 }

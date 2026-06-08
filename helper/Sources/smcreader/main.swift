@@ -43,13 +43,7 @@ do {
 
 // 3. Probe catalogue
 let t2 = Device.isT2
-// `catalog` is mutable: after a sleep/wake transition we re-run the probe
-// in place (see the timer handler's wake-recovery block) and reassign it.
-var catalog = CatalogProbe.probe(reader: smc, t2: t2)
-// Snapshot of the startup probe — the set of sensors we *expect* to be
-// present. Used after a wake re-probe to decide whether to keep retrying
-// (some sensors take longer than others to come back online).
-let expectedCatalog = catalog
+let catalog = CatalogProbe.probe(reader: smc, t2: t2)
 
 // 3a. Power-probe diagnostic dump. Walks every known power SMC key and
 // reports key + dataType + decoded value on stderr. Stream Deck captures
@@ -116,89 +110,25 @@ timer.schedule(deadline: .now() + .milliseconds(1000), repeating: .seconds(1))
 let consecutiveFailuresThreshold = 10
 let failureCounter = FailureCounter()
 
-// Sleep/wake detection: timer fires every 1s on a healthy system. A gap
-// over 10s between consecutive ticks means the process was paused —
-// almost certainly a sleep/wake transition (or SIGSTOP / debugger
-// attach). The AppleSMC connection silently goes stale for some package
-// sensors through these transitions, so we recycle it.
-final class TickGapTracker {
-    private var lastTickAt: TimeInterval? = nil
-    /// Returns the elapsed gap iff it exceeded the threshold (otherwise nil).
-    /// Always records the current time as the new "last tick".
-    func markAndCheckLongGap(thresholdSeconds: Double) -> Double? {
-        let now = Date().timeIntervalSince1970
-        defer { lastTickAt = now }
-        guard let last = lastTickAt else { return nil }   // first tick: no gap
-        let gap = now - last
-        return gap > thresholdSeconds ? gap : nil
-    }
-}
-let gapTracker = TickGapTracker()
-let longGapThresholdSeconds = 10.0
-
-// Wake recovery (v1.5.1). v1.2.3 reset the connection ~1s after wake but
-// kept the same catalog — so it stayed bound to the exact sensor keys that
-// had gone stale (RAM/GPU/ambient package sensors), and never recovered
-// them. The fresh-process path (manual restart) works because it RE-PROBES.
-// So on wake we now:
-//   1. note the wake, but keep reading+emitting the sensors that still work
-//      (CPU cores, fans) so the supervisor's stale-watch stays satisfied;
-//   2. after a settle delay (SMC needs time to re-init package sensors),
-//      reset the connection AND re-run the full catalog probe, then emit a
-//      fresh ready event — exactly what a fresh process does;
-//   3. if the re-probe still misses a sensor that existed at startup, retry
-//      the whole thing a few more times (the SMC may need longer than one
-//      settle period). Self-healing regardless of how long recovery takes.
-var wakeReprobeDeadline: TimeInterval? = nil
-var wakeReprobeRetriesLeft = 0
-let wakeSettleSeconds = 5.0
-let wakeReprobeMaxRetries = 4
+// Wake recovery: subscribe to IOKit system-power notifications and exit
+// cleanly on kIOMessageSystemHasPoweredOn so the plugin's supervisor
+// respawns us with a fresh SMC connection + fresh catalog probe. v1.5.1's
+// in-process recycle didn't reliably recover the package-level sensors
+// (RAM/GPU/ambient); a fresh process always does. The kernel fires the
+// powered-on message after the AppleSMC driver has re-initialised, so the
+// new process arrives at the right moment.
+let powerNotifier = PowerNotifier(onWake: {
+    logDiag("power: kIOMessageSystemHasPoweredOn — exiting for supervisor respawn")
+    shutdown.signal()
+})
+powerNotifier.start()
 
 // Disk-I/O rate sampler: tracks previous cumulative counters across
 // ticks so we can report bytes/sec each second.
 let diskIORate = SystemStats.DiskIORate()
 
 timer.setEventHandler { [smc] in
-    let nowWall = Date().timeIntervalSince1970
-
-    // Wake detection: a gap over the threshold between consecutive ticks
-    // means the process was paused (sleep/wake, SIGSTOP, debugger). Schedule
-    // a re-probe after a settle delay; the disk-I/O baseline is stale too.
-    // We deliberately DON'T reset/re-probe immediately — we fall through and
-    // keep emitting whatever still reads, so the supervisor's stale-watch is
-    // satisfied while the SMC stabilizes.
-    if let gap = gapTracker.markAndCheckLongGap(thresholdSeconds: longGapThresholdSeconds) {
-        logDiag("wake detected (gap \(Int(gap))s) — re-probe in \(Int(wakeSettleSeconds))s")
-        wakeReprobeDeadline = nowWall + wakeSettleSeconds
-        wakeReprobeRetriesLeft = wakeReprobeMaxRetries
-        diskIORate.resetBaseline()
-    }
-
-    // Settle elapsed → reset the connection and re-run the full catalog
-    // probe (the fresh-process recovery). Retry if sensors are still missing.
-    if let deadline = wakeReprobeDeadline, nowWall >= deadline {
-        do {
-            try smc.reset()
-        } catch {
-            logDiag("smc: reset failed (\(error)) — exiting for supervisor restart")
-            shutdown.signal()
-            return
-        }
-        catalog = CatalogProbe.probe(reader: smc, t2: t2)
-        emit(makeReadyEvent(catalog))
-        diskIORate.resetBaseline()
-        logDiag("wake re-probe: cores=\(catalog.cpuCores.count) gpu=\(catalog.gpu?.key ?? "none") ram=\(catalog.ram?.key ?? "none") air=\(catalog.ambient?.key ?? "none") ssd=\(catalog.ssd?.key ?? "none")")
-
-        if catalog.isMissingSensorsFrom(expectedCatalog) && wakeReprobeRetriesLeft > 0 {
-            wakeReprobeRetriesLeft -= 1
-            wakeReprobeDeadline = nowWall + wakeSettleSeconds
-            logDiag("wake re-probe still missing sensors — \(wakeReprobeRetriesLeft) retries left")
-        } else {
-            wakeReprobeDeadline = nil
-        }
-    }
-
-    let ts = Int64(nowWall)
+    let ts = Int64(Date().timeIntervalSince1970)
 
     var cpu: [String: Double] = [:]
     for entry in catalog.cpuCores {
