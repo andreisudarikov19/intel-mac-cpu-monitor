@@ -358,4 +358,102 @@ struct CatalogTests {
         #expect(abs(rpm! - 1844) <= 1)
     }
 
+    // MARK: - Additive catalog merge (rescan)
+
+    /// Four-core CPU + GPU + RAM + ambient + SSD + one fan — the canonical
+    /// "everything works" probe result used to anchor the merge tests.
+    private func fullCatalogFixture() -> SensorCatalog {
+        let smc = MockSMC()
+        for i in 0...3 { smc.setTemp(key: "TC\(i)c", celsius: 50) }
+        smc.setTemp(key: "TG0D", celsius: 47)
+        smc.setTemp(key: "TM0P", celsius: 38)
+        smc.setTemp(key: "TA0P", celsius: 22)
+        smc.setTemp(key: "TH0F", celsius: 40)
+        smc.setRawByte(key: "FNum", b0: 1)
+        smc.setFltFan(key: "F0Mn", rpm: 1200)
+        smc.setFltFan(key: "F0Mx", rpm: 2700)
+        return CatalogProbe.probe(reader: smc, t2: true)
+    }
+
+    /// Same shape but only the CPU cores + fan — the "post-wake partial"
+    /// probe shape we observed in helper.log on 2026-06-09 morning.
+    private func partialCatalogFixture() -> SensorCatalog {
+        let smc = MockSMC()
+        for i in 0...3 { smc.setTemp(key: "TC\(i)c", celsius: 50) }
+        smc.setTemp(key: "TH0F", celsius: 40)
+        smc.setRawByte(key: "FNum", b0: 1)
+        smc.setFltFan(key: "F0Mn", rpm: 1200)
+        smc.setFltFan(key: "F0Mx", rpm: 2700)
+        return CatalogProbe.probe(reader: smc, t2: true)
+    }
+
+    @Test func merge_identical_isNoOp() {
+        let cat = fullCatalogFixture()
+        let (merged, upgraded) = cat.mergedAdditive(with: cat)
+        #expect(upgraded == false)
+        #expect(merged.gpu?.key == "TG0D")
+        #expect(merged.ram?.key == "TM0P")
+        #expect(merged.ambient?.key == "TA0P")
+    }
+
+    @Test func merge_addsMissingSensors_upgrades() {
+        // Real-world shape: partial catalog from a too-early post-wake probe;
+        // rescan a moment later finds the package sensors. Merge should
+        // adopt them without losing the cores/fan we already had.
+        let partial = partialCatalogFixture()
+        let rich = fullCatalogFixture()
+        #expect(partial.gpu == nil)
+        #expect(partial.ram == nil)
+        #expect(partial.ambient == nil)
+        let (merged, upgraded) = partial.mergedAdditive(with: rich)
+        #expect(upgraded == true)
+        #expect(merged.gpu?.key == "TG0D")
+        #expect(merged.ram?.key == "TM0P")
+        #expect(merged.ambient?.key == "TA0P")
+        #expect(merged.cpuCores.count == 4)
+        #expect(merged.fans.count == 1)
+    }
+
+    @Test func merge_neverDowngrades() {
+        // Rescan briefly fails to find sensors we already had — keep them.
+        let rich = fullCatalogFixture()
+        let partial = partialCatalogFixture()
+        let (merged, upgraded) = rich.mergedAdditive(with: partial)
+        #expect(upgraded == false)
+        #expect(merged.gpu?.key == "TG0D")
+        #expect(merged.ram?.key == "TM0P")
+        #expect(merged.ambient?.key == "TA0P")
+        #expect(merged.cpuCores.count == rich.cpuCores.count)
+    }
+
+    @Test func merge_addsCoresWhenRescanFindsMore() {
+        let partial = partialCatalogFixture()           // 4 cores
+        let smc = MockSMC()
+        for i in 0...9 { smc.setTemp(key: "TC\(i)c", celsius: 50) }
+        smc.setRawByte(key: "FNum", b0: 1)
+        smc.setFltFan(key: "F0Mn", rpm: 1200)
+        smc.setFltFan(key: "F0Mx", rpm: 2700)
+        let rescan = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(rescan.cpuCores.count == 10)
+        let (merged, upgraded) = partial.mergedAdditive(with: rescan)
+        #expect(upgraded == true)
+        #expect(merged.cpuCores.count == 10)
+    }
+
+    @Test func merge_keepsPreferredKeyWhenBothPresent() {
+        // Both catalogs have a sensor in the same slot; merge keeps `self`'s.
+        let a = fullCatalogFixture()  // gpu=TG0D
+        let smc = MockSMC()
+        for i in 0...3 { smc.setTemp(key: "TC\(i)c", celsius: 50) }
+        smc.setTemp(key: "TCGC", celsius: 47)         // alt GPU candidate
+        smc.setRawByte(key: "FNum", b0: 1)
+        smc.setFltFan(key: "F0Mn", rpm: 1200)
+        smc.setFltFan(key: "F0Mx", rpm: 2700)
+        let b = CatalogProbe.probe(reader: smc, t2: true)
+        #expect(b.gpu?.key == "TCGC")
+        let (merged, upgraded) = a.mergedAdditive(with: b)
+        // a's TG0D is preferred; merge never swaps a working sensor.
+        #expect(merged.gpu?.key == "TG0D")
+        #expect(upgraded == false)
+    }
 }

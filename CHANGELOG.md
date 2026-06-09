@@ -9,6 +9,33 @@ All notable changes to the Intel Mac Hardware Monitor plugin. Each entry describ
 
 ---
 
+## v1.5.3 (2026-06-09)
+
+Bug-fix release. v1.5.2 fixed the short-sleep case but failed after a 10-hour overnight sleep on the reference iMac 27": the three package-level sensors (TG0D, TM0P, TA0P) didn't come back even though the helper had respawned correctly on the wake notification. Diagnostic evidence (a fresh `smcreader` spawned in parallel ~2 hours after wake sees all three sensors live) showed the SMC had recovered — but our helper's catalog was frozen as of the immediately-post-wake probe, which captured the SMC mid-recovery.
+
+### Root cause
+- `kIOMessageSystemHasPoweredOn` fires when the system has powered on, not when every SMC sensor has finished its own warmup. On long sleeps, some package sensors take minutes to come back after that point. The helper's catalog probe at startup ran in that window and dropped the keys that hadn't recovered yet.
+- A process probes once and never re-probes, so missed sensors stayed missed for the lifetime of that helper — until the next wake or manual restart.
+
+### Fixed
+- **Periodic catalog rescan.** The helper now re-runs `CatalogProbe.probe` on a timer. Cadence: **every 5 s for the first 5 minutes** after spawn (handles late-recovering sensors after wake), then **every 60 s** steady-state. Each rescan is merged into the current catalog *additively* — a slot we already have is never downgraded; a slot we were missing gets filled in. When the merge upgrades any slot, the helper emits a fresh `ready` event and the plugin adopts the new catalog.
+- **Temperature-probe diagnostic dump.** Parallel to the existing `power-probe`: every temp candidate key (per-core CPU, package, GPU, ambient, RAM, SSD, chipset, Wi-Fi, Thunderbolt) is logged with its dataType + raw bytes + decoded value. Emitted at startup AND after every rescan, tagged `temp-probe (startup)` / `temp-probe (rescan)`. Surfaces exactly which keys responded and how at every moment.
+
+### Technical
+- `SensorCatalog.mergedAdditive(with:)` — new extension method on `Catalog.swift`. Returns `(catalog, upgraded)` where `upgraded` is true iff a previously-missing slot was filled. `cpuCores` / `fans` arrays use longest-wins.
+- `Sensors.allKnownTempKeysForDiagnostics` — flat list (cpuCoreCandidates × 16 + every temp preference list).
+- `main.swift`: `catalog` is `var` again so the rescan can swap. Adaptive `DispatchSourceTimer` on the same `timerQueue` as the reading timer (serial; no concurrent mutation). Helper logs a one-line `rescan upgrade: …` summary describing every slot that was filled (e.g. `rescan upgrade: gpu=TG0D, ram=TM0P, air=TA0P`).
+- Plugin side unchanged — the hub's existing `onReady` handler already replaces its catalog and clears histories on each fresh ready event, so rescan upgrades flow through end-to-end without code changes.
+
+### Behavioural note
+- When a rescan upgrades the catalog, all subscribed histories clear (the existing `onReady` semantic, dating from v1.0). On a typical post-wake recovery, this is a single clear within ~10 s of wake and is essentially invisible. If the SMC brings sensors back staggered across multiple rescans, the user will see graphs reset for each upgrade event. Acceptable for v1.5.3; per-slot selective clearing is a future polish.
+
+### Testing notes
+- 5 new merge tests cover identical-no-op, upgrade-adds-missing, never-downgrade, more-cores-wins, both-have-same-slot-prefers-self. Total: 91 Swift + 127 TypeScript = **218** (up from 213).
+- The long-wake case can't be reliably reproduced without a real sleep/wake cycle longer than the SMC's package-sensor warmup window. The mechanism (rescan → merge → ready) is unit-tested; final confirmation comes from a real overnight sleep.
+
+---
+
 ## v1.5.2 (2026-06-08)
 
 Bug-fix release. Real-hardware sleep/wake testing confirmed that v1.5.1's in-process recovery (recycle `io_connect_t` + re-probe catalog after a tick-gap heuristic) still left RAM temp, GPU temp, and ambient air temp persistently "No data" after waking from sleep. Replaces the heuristic with the canonical IOKit power-management notification and switches recovery from in-process reset to a clean helper respawn — the path that the manual-restart workaround proved actually works. Also adds an independent helper-stderr log file because Stream Deck's own plugin log never surfaced our recovery-diagnostic lines.

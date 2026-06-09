@@ -127,6 +127,25 @@ enum Sensors {
         "PSTR", "PDTR", "PZ0F",
     ]
 
+    /// Every temperature SMC key we know about — used by the diagnostic
+    /// dump (parallel to the power-probe) so we can see what each candidate
+    /// reads on startup and after every rescan. NOT used by per-tick reads.
+    static let allKnownTempKeysForDiagnostics: [String] = {
+        var keys: [String] = []
+        for i in cpuCoreIndices {
+            keys.append(contentsOf: cpuCoreCandidates(index: i))
+        }
+        keys.append(contentsOf: cpuPackageKeysInPreferenceOrder)
+        keys.append(contentsOf: gpuKeysInPreferenceOrder)
+        keys.append(contentsOf: ambientKeysInPreferenceOrder)
+        keys.append(contentsOf: ramKeysInPreferenceOrder)
+        keys.append(contentsOf: ssdKeysInPreferenceOrder)
+        keys.append(contentsOf: chipsetKeysInPreferenceOrder)
+        keys.append(contentsOf: wifiKeysInPreferenceOrder)
+        keys.append(contentsOf: thunderboltKeysInPreferenceOrder)
+        return keys
+    }()
+
     /// Number-of-fans key. Source: SMC+Fans.swift in Fanny/SMC.
     static let fanCountKey = "FNum"
 

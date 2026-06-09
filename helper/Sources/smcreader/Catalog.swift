@@ -25,6 +25,64 @@ struct SensorEntry {
     let coreIndex: Int?      // populated for per-core CPU entries
 }
 
+extension SensorCatalog {
+    /// Merge another (re-probed) catalog into this one *additively*: every
+    /// slot we already have stays; any slot the new probe found that we
+    /// were missing gets filled in. The returned `upgraded` flag is true
+    /// iff at least one slot was filled.
+    ///
+    /// Drives the periodic rescan: after wake some SMC keys take minutes
+    /// to come back online (longer than the kernel's
+    /// kIOMessageSystemHasPoweredOn would suggest), so the post-wake
+    /// startup probe can miss them. We rescan repeatedly and adopt any
+    /// newly-available sensor without ever downgrading a working one.
+    func mergedAdditive(with other: SensorCatalog) -> (catalog: SensorCatalog, upgraded: Bool) {
+        let newCpuPackage  = cpuPackage  ?? other.cpuPackage
+        let newGpu         = gpu         ?? other.gpu
+        let newAmbient     = ambient     ?? other.ambient
+        let newRam         = ram         ?? other.ram
+        let newSsd         = ssd         ?? other.ssd
+        let newChipset     = chipset     ?? other.chipset
+        let newWifi        = wifi        ?? other.wifi
+        let newThunderbolt = thunderbolt ?? other.thunderbolt
+        let newCpuPower    = cpuPower    ?? other.cpuPower
+        let newGpuPower    = gpuPower    ?? other.gpuPower
+        let newCores = cpuCores.count >= other.cpuCores.count ? cpuCores : other.cpuCores
+        let newFans  = fans.count     >= other.fans.count     ? fans     : other.fans
+
+        let upgraded =
+            (cpuPackage  == nil && newCpuPackage  != nil) ||
+            (gpu         == nil && newGpu         != nil) ||
+            (ambient     == nil && newAmbient     != nil) ||
+            (ram         == nil && newRam         != nil) ||
+            (ssd         == nil && newSsd         != nil) ||
+            (chipset     == nil && newChipset     != nil) ||
+            (wifi        == nil && newWifi        != nil) ||
+            (thunderbolt == nil && newThunderbolt != nil) ||
+            (cpuPower    == nil && newCpuPower    != nil) ||
+            (gpuPower    == nil && newGpuPower    != nil) ||
+            (newCores.count > cpuCores.count) ||
+            (newFans.count  > fans.count)
+
+        let merged = SensorCatalog(
+            cpuCores: newCores,
+            cpuPackage: newCpuPackage,
+            gpu: newGpu,
+            ambient: newAmbient,
+            ram: newRam,
+            ssd: newSsd,
+            chipset: newChipset,
+            wifi: newWifi,
+            thunderbolt: newThunderbolt,
+            cpuPower: newCpuPower,
+            gpuPower: newGpuPower,
+            fans: newFans,
+            t2: t2
+        )
+        return (merged, upgraded)
+    }
+}
+
 struct FanCatalogEntry {
     let index: Int
     let min: Int?

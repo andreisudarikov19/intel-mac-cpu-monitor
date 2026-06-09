@@ -41,9 +41,11 @@ do {
     exit(1)
 }
 
-// 3. Probe catalogue
+// 3. Probe catalogue. `var` because the rescan timer may merge in newly-
+// available sensors after wake (the SMC sometimes brings back package
+// keys minutes after kIOMessageSystemHasPoweredOn).
 let t2 = Device.isT2
-let catalog = CatalogProbe.probe(reader: smc, t2: t2)
+var catalog = CatalogProbe.probe(reader: smc, t2: t2)
 
 // 3a. Power-probe diagnostic dump. Walks every known power SMC key and
 // reports key + dataType + decoded value on stderr. Stream Deck captures
@@ -71,6 +73,30 @@ for key in Sensors.allKnownPowerKeysForDiagnostics {
     }
 }
 logDiag("=== end power-probe ===")
+
+// Temperature diagnostic dump: emitted at startup and after every rescan.
+// Captures what each candidate temp SMC key returned at that moment so we
+// can tell — after a sleep/wake cycle — whether a sensor was unavailable,
+// returned a stuck value, or decoded correctly. Same shape as power-probe.
+func logTempProbe(_ label: String) {
+    logDiag("=== temp-probe (\(label)) ===")
+    for key in Sensors.allKnownTempKeysForDiagnostics {
+        if let r = smc.read(key: key) {
+            let c = Decoders.decodeTemperature(
+                b0: r.bytes.0, b1: r.bytes.1, b2: r.bytes.2, b3: r.bytes.3,
+                dataType: r.dataType
+            )
+            let valueStr = c.map { String(format: "%.3f C", $0) } ?? "nil"
+            let bytes = String(format: "%02X %02X %02X %02X",
+                r.bytes.0, r.bytes.1, r.bytes.2, r.bytes.3)
+            logDiag("  \(key)  dataType=\"\(r.dataType)\"  bytes=\(bytes)  decoded=\(valueStr)")
+        } else {
+            logDiag("  \(key)  (absent)")
+        }
+    }
+    logDiag("=== end temp-probe (\(label)) ===")
+}
+logTempProbe("startup")
 
 // Build a ReadyEvent from a catalog. Called at startup and again after
 // every successful wake re-probe so the plugin rebuilds its view of which
@@ -123,9 +149,69 @@ let powerNotifier = PowerNotifier(onWake: {
 })
 powerNotifier.start()
 
+// Periodic catalog rescan: re-probe and *additively* merge into the
+// current catalog so a sensor that comes online after the initial probe
+// gets adopted. Burst cadence (5 s) for the first 5 minutes after spawn —
+// the SMC sometimes brings package keys (TG0D / TM0P / TA0P) back well
+// after kIOMessageSystemHasPoweredOn — then 60 s steady state.
+let spawnTime = Date()
+let rescanBurstWindowSeconds: TimeInterval = 300
+let rescanBurstIntervalSeconds: Double = 5
+let rescanSteadyIntervalSeconds: Double = 60
+
+func nextRescanInterval() -> DispatchTimeInterval {
+    let elapsed = Date().timeIntervalSince(spawnTime)
+    let seconds = elapsed < rescanBurstWindowSeconds
+        ? rescanBurstIntervalSeconds
+        : rescanSteadyIntervalSeconds
+    return .milliseconds(Int(seconds * 1000))
+}
+
+let rescanTimer = DispatchSource.makeTimerSource(queue: timerQueue)
+
 // Disk-I/O rate sampler: tracks previous cumulative counters across
 // ticks so we can report bytes/sec each second.
 let diskIORate = SystemStats.DiskIORate()
+
+func describeUpgrades(from old: SensorCatalog, to new: SensorCatalog) -> String {
+    var parts: [String] = []
+    let slots: [(String, String?, String?)] = [
+        ("pkg",     old.cpuPackage?.key,  new.cpuPackage?.key),
+        ("gpu",     old.gpu?.key,         new.gpu?.key),
+        ("air",     old.ambient?.key,     new.ambient?.key),
+        ("ram",     old.ram?.key,         new.ram?.key),
+        ("ssd",     old.ssd?.key,         new.ssd?.key),
+        ("chipset", old.chipset?.key,     new.chipset?.key),
+        ("wifi",    old.wifi?.key,        new.wifi?.key),
+        ("tb",      old.thunderbolt?.key, new.thunderbolt?.key),
+        ("cpuP",    old.cpuPower?.key,    new.cpuPower?.key),
+        ("gpuP",    old.gpuPower?.key,    new.gpuPower?.key),
+    ]
+    for (label, was, now) in slots where was == nil && now != nil {
+        parts.append("\(label)=\(now!)")
+    }
+    if new.cpuCores.count > old.cpuCores.count {
+        parts.append("cores=\(old.cpuCores.count)→\(new.cpuCores.count)")
+    }
+    if new.fans.count > old.fans.count {
+        parts.append("fans=\(old.fans.count)→\(new.fans.count)")
+    }
+    return parts.joined(separator: ", ")
+}
+
+rescanTimer.setEventHandler {
+    let probed = CatalogProbe.probe(reader: smc, t2: t2)
+    logTempProbe("rescan")
+    let (merged, upgraded) = catalog.mergedAdditive(with: probed)
+    if upgraded {
+        logDiag("rescan upgrade: \(describeUpgrades(from: catalog, to: merged))")
+        catalog = merged
+        emit(makeReadyEvent(catalog))
+    }
+    rescanTimer.schedule(deadline: .now() + nextRescanInterval(), repeating: .never)
+}
+rescanTimer.schedule(deadline: .now() + nextRescanInterval(), repeating: .never)
+rescanTimer.resume()
 
 timer.setEventHandler { [smc] in
     let ts = Int64(Date().timeIntervalSince1970)
