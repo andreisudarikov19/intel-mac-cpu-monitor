@@ -64,7 +64,7 @@ Sensors are dynamically detected at startup; actions whose underlying SMC keys a
 | Action | Source | PI controls |
 |---|---|---|
 | **SSD Temp** | drive thermal sensors (`TH0A` / `TH0B` / `TH0C` / `TH0F` / `TH0x` / `TH1A`) | °C/°F, sample window |
-| **Disk I/O** | read + write bytes/sec across every block-storage driver, rendered as two independent streams in every view mode | sample window |
+| **Disk I/O** | read + write bytes/sec across every block-storage driver, rendered as two independent streams in every view mode on a logarithmic 1 MB/s – 3 GB/s scale (each meter segment ≈ 2.4× the one below) | sample window |
 
 ### Other thermals
 

@@ -100,6 +100,22 @@ describe("renderSVG", () => {
     });
 });
 
+describe("renderSVG log-scale graph", () => {
+    it("places sparkline points by log position, with zero pinned to the floor", () => {
+        // Range 1..10 000 spans four decades: 100 is exactly half-way
+        // (y = 62 + 82/2 = 103). 0 has no logarithm — it must clamp to
+        // the floor (y = 144), not produce NaN.
+        const range = { min: 1, max: 10_000 };
+        const svg = renderSVG({
+            ...baseInput,
+            samples: [0, 100, 10_000],
+            range,
+            profile: { range, scale: "log", coolMax: 10, warmMax: 100, hotMax: 1_000 },
+        });
+        expect(svg).toContain('d="M0.00,144.00 L72.00,103.00 L144.00,62.00"');
+    });
+});
+
 describe("renderSVG value-only view", () => {
     const valueInput: RenderInput = {
         ...baseInput,

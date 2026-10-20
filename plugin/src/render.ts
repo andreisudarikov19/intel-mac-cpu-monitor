@@ -30,7 +30,8 @@ export type RenderInput = {
     /** Raw numeric value (for meter view only — meter needs the unformatted
      *  number to compute lit-segment count). */
     rawValue?: number | null;
-    /** Profile (used by meter to derive per-segment colors). */
+    /** Profile (used by meter to derive per-segment colors). Its `scale`
+     *  also sets how values map onto the graph and meter axes. */
     profile?: MetricProfile;
     /** Number of trailing samples to render in the sparkline. The hub
      *  passes its current buffer here. Defaults to 30 when omitted (for
@@ -90,12 +91,32 @@ function xmlEscape(s: string): string {
         .replace(/"/g, "&quot;");
 }
 
+type Scale = MetricProfile["scale"];
+
+/** Position of `v` within `range` as a 0..1 fraction, clamped to the
+ *  range. On a "log" scale values at or below range.min (including 0,
+ *  which has no logarithm) map to 0. */
+function fractionOf(v: number, range: { min: number; max: number }, scale: Scale): number {
+    const clamped = Math.max(range.min, Math.min(range.max, v));
+    return scale === "log"
+        ? Math.log(clamped / range.min) / Math.log(range.max / range.min)
+        : (clamped - range.min) / (range.max - range.min);
+}
+
+/** Inverse of `fractionOf`: the value sitting at fraction `t` of `range`. */
+function valueAt(t: number, range: { min: number; max: number }, scale: Scale): number {
+    return scale === "log"
+        ? range.min * (range.max / range.min) ** t
+        : range.min + t * (range.max - range.min);
+}
+
 /** Build the sparkline as one `<path>` per contiguous run of non-null samples.
  *  Renders only the most recent `visibleSamples` of whatever was passed
  *  in — the buffer may hold more (the reserve window for future zoom-out). */
 function buildSparkline(
     samples: (number | null)[],
     range: { min: number; max: number },
+    scale: Scale,
     color: string,
     visibleSamples: number,
 ): string {
@@ -106,11 +127,7 @@ function buildSparkline(
     if (n === 0) return "";
 
     const xStep = n > 1 ? W / (n - 1) : W;
-    const yFor = (v: number): number => {
-        const clamped = Math.max(range.min, Math.min(range.max, v));
-        const norm = (clamped - range.min) / (range.max - range.min);
-        return GRAPH_Y + (1 - norm) * GRAPH_H;
-    };
+    const yFor = (v: number): number => GRAPH_Y + (1 - fractionOf(v, range, scale)) * GRAPH_H;
 
     // Group contiguous non-null runs.
     const runs: { startIdx: number; pts: { x: number; y: number }[] }[] = [];
@@ -180,6 +197,7 @@ function renderWithGraph(input: RenderInput): string {
     const sparkline = buildSparkline(
         input.samples,
         input.range,
+        input.profile?.scale,
         graphColor,
         input.visibleSamples ?? DEFAULT_VISIBLE_SAMPLES,
     );
@@ -190,6 +208,7 @@ function renderWithGraph(input: RenderInput): string {
         ? buildSparkline(
             input.samplesB,
             input.range,
+            input.profile?.scale,
             input.streamBColor ?? COLORS.cold,   // cyan default
             input.visibleSamples ?? DEFAULT_VISIBLE_SAMPLES,
         )
@@ -315,15 +334,15 @@ function renderMeter(input: RenderInput): string {
         : [{ x: 14, w: 116, rawValue: input.rawValue ?? null, valueText: input.valueText }];
 
     const profile = input.profile;
+    const scale = profile?.scale;
     const segmentRects: string[] = [];
     const valueTexts: string[] = [];
 
     for (const col of columns) {
         // numLit for this specific column's value
         let numLit = 0;
-        if (!input.noData && col.rawValue != null && col.rawValue >= input.range.min) {
-            const norm = (col.rawValue - input.range.min) / (input.range.max - input.range.min);
-            numLit = Math.max(0, Math.min(SEGMENTS, Math.round(norm * SEGMENTS)));
+        if (!input.noData && col.rawValue != null) {
+            numLit = Math.round(fractionOf(col.rawValue, input.range, scale) * SEGMENTS);
         }
 
         // Per-segment color: classify each segment's top-edge value via
@@ -332,8 +351,7 @@ function renderMeter(input: RenderInput): string {
             const y = COL_BOTTOM - (i + 1) * SEG_H - i * GAP;
             let color: string;
             if (profile) {
-                const segValue = input.range.min
-                    + ((i + 1) / SEGMENTS) * (input.range.max - input.range.min);
+                const segValue = valueAt((i + 1) / SEGMENTS, input.range, scale);
                 color = COLORS[bandFor(segValue, profile)];
             } else {
                 const pos = i / SEGMENTS;
