@@ -48,6 +48,12 @@ export const TEMP_RANGE = { min: 30, max: 100 } as const;
  *  the same job (classify a number into a colored band). */
 export type MetricProfile = {
     range: { min: number; max: number };
+    /** How values map onto the graph Y-axis and meter column. "linear"
+     *  (default) spaces equal differences equally; "log" spaces equal
+     *  *ratios* equally, for metrics spanning several orders of magnitude.
+     *  "log" requires range.min > 0 — values at or below it pin to the
+     *  floor. */
+    scale?: "linear" | "log";
     /** Optional. Only set on profiles where "cold" is meaningful (ambient
      *  air can reasonably read below this; CPU/GPU/RAM/SSD cannot). */
     coldMax?: number;    // ≤ this → cold band (cyan)
@@ -106,25 +112,33 @@ export const RAM_USAGE_PROFILE: MetricProfile = {
 /** Disk I/O profile (per-stream bytes/sec; each of read & write is
  *  classified independently in the dual-stream meter).
  *
- *  Range tuned to typical Mac usage rather than PCIe theoretical max:
- *  modern NVMe can technically hit 3 GB/s, but virtually no real
- *  workload sustains anywhere close. Capping the range at 1 GB/s
- *  means common operations (compile, file copy) get visible meter
- *  movement; saturating transfers > 1 GB/s correctly read as
- *  "critical, full meter" rather than getting lost in the 0–3 GB/s
- *  void.
+ *  Logarithmic, 1 MB/s → 3 GB/s. Pre-v1.5.4 the scale was linear
+ *  0–1 GB/s, so the first meter segment needed ~56 MB/s and app
+ *  installs or SD-card photo imports (bursty, tens to low hundreds of
+ *  MB/s) barely lit a single segment. On a log scale each of the 9
+ *  segments covers ~2.4× more throughput than the one below.
  *
- *  Bands tuned so segment 0 (top = 111 MB/s) lands inside the cool
- *  zone — fixes the v1.4 "no green segments" complaint where
- *  everything past idle showed orange/red.
+ *  Floor: macOS background I/O idles at ≤ 0.3 MB/s, so a 1 MB/s floor
+ *  keeps the meter dark at idle and lights it for any real activity.
+ *  Ceiling: measured sequential speed of the reference iMac 27" 2020
+ *  512 GB SSD (AJA ≈ 3.1 GB/s read and write; PCIe 3.0 ×4). Other T2
+ *  Intel Macs sit in the same 2–3 GB/s class; SATA Macs (~0.5 GB/s)
+ *  simply top out around segment 7.
+ *
+ *  Bands give the column 4 green / 2 yellow / 2 orange / 1 red
+ *  segments. Each edge sits just below the value where the next
+ *  colour's first segment lights (≈ 55 MB/s, 324 MB/s, 1.92 GB/s), so
+ *  the footer colour matches the topmost lit segment except in the
+ *  narrow gap between each edge and that lighting point.
  *
  *  Values are in BYTES/sec; display formatting (MB/s, GB/s, KB/s)
  *  is done in the hub. */
 export const DISK_IO_PROFILE: MetricProfile = {
-    range: { min: 0, max: 1_000_000_000 },     // 1 GB/s = common saturation point
-    coolMax:    200_000_000,                    // 200 MB/s — moderate sustained I/O
-    warmMax:    500_000_000,                    // 500 MB/s — heavy transfer
-    hotMax:     800_000_000,                    // 800 MB/s — near saturation
+    range: { min: 1_000_000, max: 3_000_000_000 },
+    scale: "log",
+    coolMax:      50_000_000,                   // 50 MB/s — light activity
+    warmMax:     300_000_000,                   // 300 MB/s — card import, app install
+    hotMax:    1_900_000_000,                   // 1.9 GB/s — fast external / internal copy
 };
 
 /** Classify a numeric reading into a color band using a profile.

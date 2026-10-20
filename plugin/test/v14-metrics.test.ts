@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { renderSVG, type RenderInput } from "../src/render.js";
 import { Hub, formatBytesPerSec, formatBytesPerSecCompact } from "../src/hub.js";
-import { RAM_USAGE_PROFILE, DISK_IO_PROFILE, bandFor, TEXT_COLOR } from "../src/thresholds.js";
+import { RAM_USAGE_PROFILE, DISK_IO_PROFILE, bandFor, COLORS, TEXT_COLOR } from "../src/thresholds.js";
 
 describe("v1.4 metrics — RAM usage profile", () => {
     it("classifies common RAM-usage scenarios into the right bands", () => {
@@ -14,30 +14,70 @@ describe("v1.4 metrics — RAM usage profile", () => {
     });
 });
 
-describe("v1.5 — Disk I/O profile (recalibrated for green visibility)", () => {
-    it("classifies common I/O rates with at least one cool band", () => {
+describe("v1.5.4 — Disk I/O log scale (1 MB/s – 3 GB/s)", () => {
+    // Dual-column meter exactly as the hub builds it for the DISK key:
+    // left column (x=14) = read, right column (x=78) = write.
+    const meter = (read: number | null, write: number | null): string => renderSVG({
+        label: "DISK",
+        valueText: "",
+        valueTextB: "",
+        band: "cool",
+        noData: false,
+        samples: [],
+        samplesB: [],
+        range: DISK_IO_PROFILE.range,
+        viewMode: "meter",
+        rawValue: read,
+        rawValueB: write,
+        profile: DISK_IO_PROFILE,
+    });
+    const litIn = (svg: string, x: number): number =>
+        (svg.match(new RegExp(`<rect x="${x}"[^>]*fill-opacity="1"`, "g")) ?? []).length;
+
+    // Segment k lights once the value reaches 1 MB/s × 3000^((k − ½) / 9):
+    // 1.6, 3.8, 9.2, 22, 55, 133, 324, 789 MB/s, 1.9 GB/s.
+    it.each([
+        [0,              0],   // idle
+        [300_000,        0],   // background chatter (≤ 0.3 MB/s measured at idle)
+        [2_000_000,      1],
+        [10_000_000,     3],
+        [25_000_000,     4],
+        [90_000_000,     5],   // SD-card photo import
+        [150_000_000,    6],
+        [1_000_000_000,  8],   // fast external SSD
+        [2_500_000_000,  9],   // internal SSD near full speed
+        [5_000_000_000,  9],   // above range clamps to full
+    ])("%d B/s lights %d segments", (bps, lit) => {
+        expect(litIn(meter(bps, 0), 14)).toBe(lit);
+    });
+
+    it("read and write columns fill independently", () => {
+        const svg = meter(90_000_000, 2_000_000);
+        expect(litIn(svg, 14)).toBe(5);
+        expect(litIn(svg, 78)).toBe(1);
+    });
+
+    it("column colours run 4 green, 2 yellow, 2 orange, 1 red bottom-up", () => {
+        const svg = meter(3_000_000_000, 0);
+        const fills = [...svg.matchAll(/<rect x="14"[^>]*fill="(#[0-9A-Fa-f]{6})"/g)].map((m) => m[1]);
+        expect(fills).toEqual([
+            COLORS.cool, COLORS.cool, COLORS.cool, COLORS.cool,
+            COLORS.warm, COLORS.warm,
+            COLORS.hot, COLORS.hot,
+            COLORS.critical,
+        ]);
+    });
+
+    it("bands: idle and light I/O green, heavy yellow/orange, near drive max red", () => {
         const p = DISK_IO_PROFILE;
         expect(bandFor(0, p)).toBe("cool");                    // idle
-        expect(bandFor(50_000_000, p)).toBe("cool");           // 50 MB/s = light
-        expect(bandFor(200_000_000, p)).toBe("cool");          // 200 MB/s = boundary
-        expect(bandFor(300_000_000, p)).toBe("warm");          // 300 MB/s = active
-        expect(bandFor(500_000_000, p)).toBe("warm");          // 500 MB/s = boundary
-        expect(bandFor(700_000_000, p)).toBe("hot");           // 700 MB/s = heavy
-        expect(bandFor(800_000_000, p)).toBe("hot");           // 800 MB/s = boundary
-        expect(bandFor(900_000_000, p)).toBe("critical");      // 900 MB/s = saturating
-        expect(bandFor(2_000_000_000, p)).toBe("critical");    // 2 GB/s = clamped, critical
-    });
-
-    it("range is 0–1 GB/s (covers common saturation; > 1 GB/s shows as critical/full)", () => {
-        expect(DISK_IO_PROFILE.range.min).toBe(0);
-        expect(DISK_IO_PROFILE.range.max).toBe(1_000_000_000);
-    });
-
-    it("segment 0's top edge (111 MB/s) lies inside the cool band (regression for v1.4 bug)", () => {
-        // Step = 1 GB / 9 ≈ 111 MB/s. If coolMax < 111 MB/s, segment 0
-        // would be classified as warm and the meter loses its green zone.
-        const step = DISK_IO_PROFILE.range.max / 9;
-        expect(bandFor(step, DISK_IO_PROFILE)).toBe("cool");
+        expect(bandFor(20_000_000, p)).toBe("cool");           // light
+        expect(bandFor(50_000_000, p)).toBe("cool");           // boundary
+        expect(bandFor(100_000_000, p)).toBe("warm");          // card import
+        expect(bandFor(300_000_000, p)).toBe("warm");          // boundary
+        expect(bandFor(500_000_000, p)).toBe("hot");           // heavy
+        expect(bandFor(1_500_000_000, p)).toBe("hot");         // fast external
+        expect(bandFor(2_500_000_000, p)).toBe("critical");    // near internal SSD max
     });
 });
 

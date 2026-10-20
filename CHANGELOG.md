@@ -9,6 +9,37 @@ All notable changes to the Intel Mac Hardware Monitor plugin. Each entry describ
 
 ---
 
+## v1.5.4 (2026-10-20)
+
+Readability release for the Disk I/O key. The read/write meter and graph now use a logarithmic 1 MB/s – 3 GB/s scale, so everyday disk activity (app installs, photo imports) fills a visible part of the key instead of flickering a single segment.
+
+### Root cause
+- The v1.5 scale was linear 0–1 GB/s. The first meter segment needed ~56 MB/s, so bursty workloads in the tens-to-hundreds of MB/s (e.g. a ~90 MB/s SD-card RAW import) lit one segment for a second and then went dark. The graph line sat flat on the floor for the same reason.
+
+### Changed
+- **Logarithmic Disk I/O scale, 1 MB/s → 3 GB/s.** Each of the 9 meter segments covers ~2.4× the throughput of the one below; segments light at ≈ 1.6, 3.8, 9.2, 22, 55, 133, 324, 789 MB/s and 1.9 GB/s. Applies to both meter columns and both graph sparklines; the slide view's numbers are unchanged.
+  - **Floor 1 MB/s:** macOS background I/O idles at ≤ 0.3 MB/s, so the meter stays dark at idle and lights for any real activity.
+  - **Ceiling 3 GB/s:** measured sequential speed of the reference iMac 27" 2020 512 GB SSD (AJA ≈ 3.1 GB/s read and write, PCIe 3.0 ×4). Other T2 Intel Macs are in the same 2–3 GB/s class; SATA Macs (~0.5 GB/s) top out around segment 7.
+- **Disk I/O colour bands re-cut for the log scale:** cool ≤ 50 MB/s, warm ≤ 300 MB/s, hot ≤ 1.9 GB/s, critical above — 4 green / 2 yellow / 2 orange / 1 red segments. Each edge sits just below the value where the next colour's first segment lights (≈ 55 MB/s, 324 MB/s, 1.92 GB/s), so the footer colour matches the topmost lit segment except in the narrow gap between each edge and that lighting point.
+
+| Workload | v1.5.3 (linear) | v1.5.4 (log) |
+|---|---|---|
+| Idle (≤ 0.3 MB/s) | 0 | 0 |
+| App install, 40 / 120 MB/s | 0 / 1 | 4 / 5 |
+| SD-card RAW import, 90 MB/s | 1 | 5 |
+| External SSD copy, 900 MB/s | 9 | 8 |
+| Internal SSD near max, 2.8 GB/s | 9 | 9 |
+
+### Technical
+- `MetricProfile` gains an optional `scale: "linear" | "log"` (default linear; `"log"` requires `range.min > 0`). Only `DISK_IO_PROFILE` opts in — every other key renders exactly as before.
+- `render.ts`: new `fractionOf` / `valueAt` pair maps values onto the axis and back; used by the sparkline Y position, the meter's lit-segment count, and per-segment colour. On a log scale, values at or below the floor (including 0) pin to the bottom rather than producing NaN.
+- Hub unchanged — it already passes `DISK_IO_PROFILE` to the renderer for every disk view.
+
+### Testing notes
+- Replaced the three linear-range disk tests with 14 new ones: a lit-segment table across idle → beyond-max throughput, independent read/write columns, bottom-up column colours, band edges, and log placement of graph points (including 0 → floor). Total: 91 Swift (helper unchanged, not re-run) + 138 TypeScript = **229** (up from 218).
+
+---
+
 ## v1.5.3 (2026-06-09)
 
 Bug-fix release. v1.5.2 fixed the short-sleep case but failed after a 10-hour overnight sleep on the reference iMac 27": the three package-level sensors (TG0D, TM0P, TA0P) didn't come back even though the helper had respawned correctly on the wake notification. Diagnostic evidence (a fresh `smcreader` spawned in parallel ~2 hours after wake sees all three sensors live) showed the SMC had recovered — but our helper's catalog was frozen as of the immediately-post-wake probe, which captured the SMC mid-recovery.
